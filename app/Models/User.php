@@ -21,6 +21,8 @@ class User extends Authenticatable
         'name',
         'username',
         'password',
+        'productionID',
+        'role',
     ];
 
     /**
@@ -44,4 +46,10 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+
+    public function assignedPis()
+    {
+        return $this->hasMany(ProformaInvoice::class);
+    }
+    
 }
