@@ -1,8 +1,8 @@
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-            สรุปรายการ Proforma invoice
-        </h2>
+        <nav class="text-sm text-gray-600 flex items-center space-x-2">
+            <span class="text-gray-800 font-medium">สรุปรายการ Proforma Invoice</span>
+        </nav>
     </x-slot>
 
     <div class="py-6 px-6">
@@ -13,7 +13,7 @@
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold">ภาพรวม Proforma invoice</h3>
                     <!-- Filter Form -->
-                    <form method="GET" action="{{ route('dashboard') }}" id="monthFilterForm" class="flex items-center space-x-2">
+                    <form method="GET" action="{{ route('dashboard.index') }}" id="monthFilterForm" class="flex items-center space-x-2">
                         <label for="month" class="font-medium text-gray-700 text-sm">เลือกเดือน:</label>
                         <select name="month" id="month" onchange="document.getElementById('monthFilterForm').submit()" class="border border-gray-300 rounded px-3 py-1 text-sm">
                             <option value="">ทุกเดือน</option>
@@ -50,7 +50,7 @@
                     <h3 class="text-lg font-semibold">
                         รายการ Proforma invoice ตาม{{ $groupBy === 'production' ? 'ผู้รับผิดชอบ Production' : 'โรงงาน' }}
                     </h3>
-                    <form method="GET" action="{{ route('dashboard') }}" class="flex items-center space-x-2">
+                    <form method="GET" action="{{ route('dashboard.index') }}" class="flex items-center space-x-2">
                         <input type="hidden" name="month" value="{{ $selectedMonth }}">
                         <label for="groupBy" class="text-sm text-gray-700">แสดงตาม:</label>
                         <select name="groupBy" id="groupBy" onchange="this.form.submit()" class="border border-gray-300 rounded px-2 py-1 text-sm">
@@ -59,13 +59,19 @@
                         </select>
                     </form>
                 </div>
-                <ul class="list-disc pl-6 text-sm text-gray-800">
-                    @forelse ($grouped as $name)
-                        <li>{{ $name }}</li>
-                    @empty
-                        <li class="text-gray-400">ไม่มีข้อมูล</li>
-                    @endforelse
-                </ul>
+                <div class="overflow-y-auto max-h-36 pr-2">
+                    <ul class="list-disc pl-6 text-sm text-gray-800 space-y-1">
+                        @forelse ($grouped as $id => $name)
+                            <li>
+                                <a href="{{ route('dashboard.detail', ['id' => $id, 'groupBy' => $groupBy]) }}" class="text-blue-600 hover:underline">
+                                    {{ $name }}
+                                </a>
+                            </li>
+                        @empty
+                            <li class="text-gray-400">ไม่มีข้อมูล</li>
+                        @endforelse
+                    </ul>
+                </div>
             </div>
         </div>
         <div class="flex flex-col md:flex-row gap-6">
@@ -79,6 +85,20 @@
                     กราฟเปรียบเทียบ PI ตรงเวลา/เลท ตาม{{ $groupBy === 'production' ? 'Production' : 'โรงงาน' }}
                 </h3>
                 <canvas id="barChartPiStatus" width="400" height="300"></canvas>
+                @if ($totalPages > 1)
+                    <div class="mt-4 flex justify-center gap-2">
+                        @for ($i = 1; $i <= $totalPages; $i++)
+                            <form method="GET" action="{{ route('dashboard.index') }}">
+                                <input type="hidden" name="month" value="{{ $selectedMonth }}">
+                                <input type="hidden" name="groupBy" value="{{ $groupBy }}">
+                                <input type="hidden" name="barPage" value="{{ $i }}">
+                                <button type="submit" class="px-3 py-1 border rounded {{ $i == $page ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700' }}">
+                                    {{ $i }}
+                                </button>
+                            </form>
+                        @endfor
+                    </div>
+                @endif
             </div>
         </div>
     </div>
@@ -89,12 +109,22 @@
         new Chart(ctx, {
             type: 'pie',
             data: {
-                labels: ['PI ตรงเวลา', 'PI ที่เลท'],
+                labels: ['PI ตรงเวลา', 'เลท 1-7 วัน', 'เลท 8-14 วัน', 'เลทเกิน 15 วัน'],
                 datasets: [{
                     label: 'จำนวน',
-                    data: [{{ $onTime }}, {{ $late }}],
-                    backgroundColor: ['rgba(34, 197, 94, 0.7)', 'rgba(239, 68, 68, 0.7)'],
-                    borderColor: ['rgba(34, 197, 94, 1)', 'rgba(239, 68, 68, 1)'],
+                    data: [{{ $onTime }}, {{ $lateYellow }}, {{ $lateRed }}, {{ $lateDarkRed }}],
+                    backgroundColor: [
+                        'rgba(34, 197, 94, 0.7)',   // Green
+                        'rgba(253, 224, 71, 0.9)',  // Yellow
+                        'rgba(239, 68, 68, 0.9)',   // Red
+                        'rgba(127, 29, 29, 0.9)'    // Dark Red
+                    ],
+                    borderColor: [
+                        'rgba(34, 197, 94, 1)',
+                        'rgba(253, 224, 71, 1)',
+                        'rgba(239, 68, 68, 1)',
+                        'rgba(127, 29, 29, 1)'
+                    ],
                     borderWidth: 1
                 }]
             },
@@ -116,12 +146,22 @@
                     {
                         label: 'ตรงเวลา',
                         data: {!! json_encode($barChartOnTime) !!},
-                        backgroundColor: 'rgba(34, 197, 94, 0.7)', // green
+                        backgroundColor: 'rgba(34, 197, 94, 0.7)',
                     },
                     {
-                        label: 'เลท',
-                        data: {!! json_encode($barChartLate) !!},
-                        backgroundColor: 'rgba(239, 68, 68, 0.7)', // red
+                        label: 'เลท 1-7 วัน',
+                        data: {!! json_encode($barChartLateYellow) !!},
+                        backgroundColor: 'rgba(253, 224, 71, 0.9)',
+                    },
+                    {
+                        label: 'เลท 8-14 วัน',
+                        data: {!! json_encode($barChartLateRed) !!},
+                        backgroundColor: 'rgba(239, 68, 68, 0.9)',
+                    },
+                    {
+                        label: 'เลทเกิน 15 วัน',
+                        data: {!! json_encode($barChartLateDarkRed) !!},
+                        backgroundColor: 'rgba(127, 29, 29, 0.9)',
                     }
                 ]
             },

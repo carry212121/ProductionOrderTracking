@@ -19,7 +19,7 @@ class DemoDataSeeder extends Seeder
     {
         // 1. Create 10 factories
         $factories = collect();
-        for ($i = 1; $i <= 10; $i++) {
+        for ($i = 1; $i <= 20; $i++) {
             $factories->push(Factory::create([
                 'FactoryName' => "Factory $i",
                 'FactoryNumber' => "F-$i"
@@ -32,7 +32,7 @@ class DemoDataSeeder extends Seeder
             $productionUsers->push(User::create([
                 'name' => "Production User $i",
                 'username' => "production$i",
-                'password' => Hash::make("Production123"),
+                'password' => Hash::make("production123"),
                 'productionID' => "P00$i",
                 'role' => 'Production',
             ]));
@@ -57,7 +57,7 @@ class DemoDataSeeder extends Seeder
                 'OrderDate' => Carbon::now()->subDays(rand(1, 60)),
                 'ScheduleDate' => null,
                 'CompletionDate' => null,
-                'SalesPerson' => null,
+                'SalesPerson' => 2,
                 'user_id' => $user->id,
             ]);
 
@@ -87,21 +87,47 @@ class DemoDataSeeder extends Seeder
                 $remaining = collect($allNextProcesses)->shuffle()->take(rand(2, 4))->toArray();
                 $processSequence = array_merge($processSequence, $remaining);
 
-                $assignDate = Carbon::now()->subDays(rand(5, 15));
                 $daysForThisProduct = 0;
                 $jcList = [];
 
-                foreach ($processSequence as $process) {
+                foreach ($processSequence as $idx => $process) {
+                    // ReceiveDate: random from past 30 days
+                    $receiveDate = Carbon::now()->subDays(rand(0, 30));
+
+                    // AssignDate: 50% chance before/after receive date
+                    $assignDate = rand(0, 1)
+                        ? $receiveDate->copy()->subDays(rand(1, 5))
+                        : $receiveDate->copy()->addDays(rand(1, 5));
+
+                    // ScheduleDate: 50% chance before/after receive date
+                    $scheduleDate = rand(0, 1)
+                        ? $receiveDate->copy()->subDays(rand(1, 3))
+                        : $receiveDate->copy()->addDays(rand(1, 3));
+
+                    // Duration for reference use (not needed for assigning dates here)
                     $duration = match ($process) {
                         'Casting' => 10,
                         'Stamping' => 14,
                         default => 7,
                     };
+                    // --- 2️⃣  For the *last* process decide whether to null‑out ReceiveDate
+                    $isLastProcess   = $idx === array_key_last($processSequence);
+                    $dropReceiveDate = $isLastProcess && rand(0, 1) === 1;   // 50 % chance
+                    $finalReceive    = $dropReceiveDate ? null : $receiveDate->copy();
+                    // Calculate lateness (only if receive after schedule)
+                    // --- 3️⃣  Calculate lateness ------------------------------------
+                    $daysLate = 0;
 
-                    $scheduleDate = $assignDate->copy()->addDays($duration);
-                    $receiveOffset = rand(-1, 2);
-                    $receiveDate = $scheduleDate->copy()->addDays($receiveOffset);
-                    $daysLate = max(0, $receiveDate->diffInDays($scheduleDate));
+                    if ($finalReceive) {                     // we do have a receive date
+                        if ($finalReceive->gt($scheduleDate)) {
+                            $daysLate = $finalReceive->diffInDays($scheduleDate);
+                        }
+                    } else {                                 // ReceiveDate is NULL → use today
+                        $today = Carbon::today();
+                        if ($today->gt($scheduleDate)) {
+                            $daysLate = $today->diffInDays($scheduleDate);
+                        }
+                    }
 
                     $jcList[] = [
                         'Billnumber' => 'BILL-' . strtoupper(Str::random(4)),
@@ -112,25 +138,24 @@ class DemoDataSeeder extends Seeder
                         'TotalWeightAfter' => rand(80, 450),
                         'AssignDate' => $assignDate->copy(),
                         'ScheduleDate' => $scheduleDate->copy(),
-                        'ReceiveDate' => $receiveDate->copy(),
+                        'ReceiveDate' => $finalReceive,
                         'Days' => $daysLate,
                         'Status' => 'Finish',
                         'product_id' => $product->id,
                         'factory_id' => $factories->random()->id,
                     ];
 
-                    $assignDate = $receiveDate->copy()->addDay();
                     $daysForThisProduct += $duration;
                 }
 
-                // 💥 70% chance to make this product incomplete
+                // 💥 70% chance to simulate incomplete product
                 $incomplete = rand(1, 100) <= 70;
                 $incompleteIndex = $incomplete ? rand(0, count($jcList) - 1) : null;
 
                 foreach ($jcList as $idx => $jcData) {
                     if ($incomplete && $idx >= $incompleteIndex) {
                         Log::info("❌ Skipping JobControl at index $idx for Product {$product->ProductNumber} (simulate incomplete)");
-                        continue; // 💥 Skip creating this JobControl
+                        continue;
                     }
 
                     $jc = JobControl::create($jcData);

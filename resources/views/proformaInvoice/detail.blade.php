@@ -1,11 +1,37 @@
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="text-xl font-semibold text-gray-800 leading-tight">
-            รายละเอียด Proforma Invoice: {{ $pi->PInumber }}
-        </h2>
+        <nav class="text-sm text-gray-600 flex items-center space-x-2">
+            <a href="{{ route('proformaInvoice.index') }}" class="hover:underline text-blue-600">รายการ Proforma Invoice</a>
+            <span>/</span>
+            <span class="text-gray-800 font-medium">รายการสินค้าของ {{ $pi->PInumber }}</span>
+        </nav>
     </x-slot>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <div class="flex justify-between items-center px-6 mt-4 gap-4 flex-wrap">
+        <h2 class="text-xl font-semibold text-gray-800 leading-tight">
+            รายการสินค้าของ Proforma Invoice: {{ $pi->PInumber }}
+        </h2>
+        <div class="flex items-center gap-2">
+            <x-filter toggleId="filterToggleBtn" panelId="filterPanel">
+                <button class="filter-option w-full text-left hover:bg-gray-200 px-2 py-1" data-filter="all">📦 แสดงทั้งหมด</button>
+                <button class="filter-option w-full text-left hover:bg-yellow-100 px-2 py-1" data-filter="yellow">🟡 ช้า 1–7 วัน</button>
+                <button class="filter-option w-full text-left hover:bg-red-100 px-2 py-1" data-filter="red">🔴 ช้า 8–14 วัน</button>
+                <button class="filter-option w-full text-left hover:bg-red-400 px-2 py-1" data-filter="darkred">🟥 ช้าเกิน 15 วัน</button>
+            </x-filter>
+            <x-search-bar id="product-search" placeholder="ค้นหารหัสสินค้า/สินค้าลูกค้า..." class="w-64" />
+        </div>
+
+    </div>
+
+    <div id="no-result-message" class="text-center text-gray-500 mt-6 hidden">
+        ไม่พบรหัสสินค้า/สินค้าลูกค้าที่ค้นหา
+    </div>
+    <div id="no-results" class="text-gray-500 text-center my-4 hidden">
+        ไม่พบรายการสินค้าที่ตรงกับตัวกรอง
+    </div>
 
     <div class="px-6 py-4 space-y-6">
         @foreach($pi->products as $index => $product)
@@ -27,7 +53,10 @@
                     }
                     $highlightRed = false;
                 @endphp
-                <div class="relative bg-white p-6 rounded-lg shadow border">
+                <div class="relative bg-white p-6 rounded-lg shadow border product-card"
+                    data-product-number="{{ $product->ProductNumber }}"
+                    data-customer-number="{{ $product->ProductCustomerNumber }}"
+                    data-created-at="{{ $product->created_at }}">
                     {{-- Toggle Status Checkbox at top-right --}}
                     {{-- {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }} --}}
                     <form method="POST" action="{{ route('products.toggleStatus', $product->id) }}" class="absolute top-2 right-3"> 
@@ -86,15 +115,33 @@
 
                                     // Only for current/latest process, check if it's late
                                     $isCurrent = $eng === $latestProcessKey;
-                                    $isLate = false;
-                                    if ($isCurrent && $jc?->ScheduleDate && $jc?->ReceiveDate) {
-                                        $schedule = \Carbon\Carbon::parse($jc->ScheduleDate);
-                                        $receive = \Carbon\Carbon::parse($jc->ReceiveDate);
-                                        $isLate = $receive->gt($schedule);
+                                    $lateDays = null;
+                                    $lateClass = '';
+
+                                    if ($jc?->ScheduleDate) {
+                                        $schedule = \Carbon\Carbon::parse($jc->ScheduleDate)->startOfDay();
+
+                                        if ($jc->ReceiveDate) {
+                                            $referenceDate = \Carbon\Carbon::parse($jc->ReceiveDate)->startOfDay();
+                                        } else {
+                                            $referenceDate = \Carbon\Carbon::today();
+                                        }
+
+                                        $lateDays = $referenceDate->gt($schedule) ? $schedule->diffInDays($referenceDate) : 0;
+
+                                        echo "<script>console.log('📦 Product ID: {$product->id} | Process: {$eng} | Schedule: {$schedule} | RefDate: {$referenceDate} | Late Days: {$lateDays}');</script>";
+
+                                        if ($lateDays > 15) {
+                                            $lateClass = 'bg-red-400 border border-red-800';
+                                        } elseif ($lateDays > 7) {
+                                            $lateClass = 'bg-red-100 border border-red-400';
+                                        } elseif ($lateDays >= 1) {
+                                            $lateClass = 'bg-yellow-100 border border-yellow-400';
+                                        }
                                     }
 
                                     $formClasses = $isCasting ? '' : 'hidden';
-                                    $formClasses .= $isCurrent && $isLate ? ' bg-red-100 border-red-400 border-2 rounded-lg p-2' : '';
+                                    $formClasses .= $lateClass ? " $lateClass rounded-lg p-2" : '';
                                 @endphp
                                 <form method="POST" action="{{ route('jobcontrols.storeOrUpdate') }}" id="form-{{ $product->id }}-{{ $eng }}"
                                     class="{{ $formClasses }} border-t pt-2 space-y-2 text-sm">
@@ -107,15 +154,44 @@
                                             <label>รหัสบิล:</label>
                                             <input type="text" name="Billnumber" value="{{ $jc->Billnumber ?? '' }}" class="border p-1 w-full" >
                                         </div>
-                                        <div>
+                                        @php
+                                            $factories = \App\Models\Factory::all();
+                                            $selectedFactoryId = old('factory_id', $jc?->factory_id);
+                                            $selectedFactory = $factories->firstWhere('id', $selectedFactoryId);
+                                            $selectedFactoryName = $selectedFactory ? $selectedFactory->FactoryName : '';
+                                        @endphp
+
+                                        <div 
+                                            x-data="{ 
+                                                open: false, 
+                                                search: '{{ $selectedFactoryName }}', 
+                                                selected: '{{ $selectedFactoryId }}' 
+                                            }" 
+                                            class="relative w-full"
+                                        >
                                             <label>โรงงาน:</label>
-                                            <select name="factory_id" class="border p-1 w-full">
-                                                @foreach(\App\Models\Factory::all() as $factory)
-                                                    <option value="{{ $factory->id }}" @selected($jc?->factory_id == $factory->id)>
+                                            <input type="hidden" name="factory_id" :value="selected">
+
+                                            <input
+                                                type="text"
+                                                x-model="search"
+                                                @focus="open = true"
+                                                @click.away="open = false"
+                                                placeholder="ค้นหาโรงงาน..."
+                                                class="w-full border p-1"
+                                            >
+
+                                            <ul x-show="open" class="absolute z-50 w-full bg-white border max-h-60 overflow-y-auto mt-1 shadow-md">
+                                                @foreach ($factories as $factory)
+                                                    <li
+                                                        @click="selected = '{{ $factory->id }}'; search = '{{ $factory->FactoryName }}'; open = false"
+                                                        x-show="search === '' || '{{ strtolower($factory->FactoryName) }}'.includes(search.toLowerCase())"
+                                                        class="px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                                                    >
                                                         {{ $factory->FactoryName }}
-                                                    </option>
+                                                    </li>
                                                 @endforeach
-                                            </select>
+                                            </ul>
                                         </div>
                                     </div>
 
@@ -145,21 +221,46 @@
 
                                     {{-- Fourth Row: AssignDate + ScheduleDate + ReceiveDate --}}
                                     <div class="grid grid-cols-3 gap-2">
-                                        <div>
+                                        <div class="flatpickr-wrapper" data-input>
                                             <label>วันสั่ง:</label>
-                                            <input type="date" name="AssignDate" value="{{ optional($jc)->AssignDate ? \Carbon\Carbon::parse($jc->AssignDate)->format('Y-m-d') : '' }}" class="border p-1 w-full">
+                                            <div class="flex items-center border p-1 w-full">
+                                                <input type="text"
+                                                    name="AssignDate"
+                                                    class="flatpickr w-full"
+                                                    value="{{ optional($jc)->AssignDate ? \Carbon\Carbon::parse($jc->AssignDate)->format('d-m-Y') : '' }}"
+                                                    data-input readonly>
+                                                <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+                                            </div>
                                         </div>
-                                        <div>
+
+                                        <div class="flatpickr-wrapper" data-input>
                                             <label>วันกำหนดรับ:</label>
-                                            <input type="date" name="ScheduleDate" value="{{ optional($jc)->ScheduleDate ? \Carbon\Carbon::parse($jc->ScheduleDate)->format('Y-m-d') : '' }}" class="border p-1 w-full">
+                                            <div class="flex items-center border p-1 w-full">
+                                                <input type="text"
+                                                    name="ScheduleDate"
+                                                    class="flatpickr w-full"
+                                                    value="{{ optional($jc)->ScheduleDate ? \Carbon\Carbon::parse($jc->ScheduleDate)->format('d-m-Y') : '' }}"
+                                                    data-input readonly>
+                                                <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+                                            </div>
                                         </div>
-                                        <div>
+                                        <div class="flatpickr-wrapper" data-input>
                                             <label>วันรับ:</label>
-                                            <input type="date" name="ReceiveDate" value="{{ optional($jc)->ReceiveDate ? \Carbon\Carbon::parse($jc->ReceiveDate)->format('Y-m-d') : '' }}" class="border p-1 w-full">
+                                            <div class="flex items-center border p-1 w-full">
+                                                <input type="text"
+                                                    name="ReceiveDate"
+                                                    class="flatpickr-max-today w-full"
+                                                    value="{{ optional($jc)->ReceiveDate ? \Carbon\Carbon::parse($jc->ReceiveDate)->format('d-m-Y') : '' }}"
+                                                    data-input
+                                                    readonly>
+                                                <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+                                            </div>
                                         </div>
+
+
                                     </div>
                                     <div class="mt-4 flex justify-end">
-                                        <button type="submit" class="w-1/3 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">บันทึก</button>
+                                        <button type="submit" class="w-1/3 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">บันทึก</button>
                                     </div>
                                 </form>
 
@@ -173,9 +274,6 @@
                                 <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดเพิ่มเติม</h3>
                                 <p>{{ $product->Description ?? 'ไม่มีรายละเอียด' }}</p>
                             </div>
-                            {{-- <div class="mt-4 flex justify-end mr-12">
-                                <button type="submit" class="w-1/3 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">บันทึก</button>
-                            </div> --}}
                         </div>
                     </div>
                 </div>
@@ -223,7 +321,9 @@
             if (!assignDateInput || !scheduleDateInput || !processInput) return;
 
             assignDateInput.addEventListener('change', () => {
-                const assignDate = new Date(assignDateInput.value);
+                const [day, month, year] = assignDateInput.value.split('-');
+                const assignDate = new Date(`${year}-${month}-${day}`);
+
                 if (!assignDate.getTime()) return;
 
                 let daysToAdd = 7;
@@ -240,7 +340,7 @@
                 const yyyy = scheduleDate.getFullYear();
                 const mm = String(scheduleDate.getMonth() + 1).padStart(2, '0');
                 const dd = String(scheduleDate.getDate()).padStart(2, '0');
-                scheduleDateInput.value = `${yyyy}-${mm}-${dd}`;
+                scheduleDateInput.value = `${dd}-${mm}-${yyyy}`;
             });
         });
         @if (session('success'))
@@ -286,5 +386,21 @@
                 form.submit();
             }
         }
+        // 🗓️ For AssignDate & ScheduleDate — clearable with no maxDate
+        flatpickr(".flatpickr-wrapper:not(.flatpickr-max-today-wrapper)", {
+            dateFormat: "d-m-Y",
+            allowInput: false,
+            wrap: true,
+            clearBtn: true
+        });
+
+        // 🛑 For ReceiveDate — clearable with maxDate: today
+        flatpickr(".flatpickr-max-today", {
+            dateFormat: "d-m-Y",
+            allowInput: false,
+            maxDate: "today",
+            clearBtn: true
+        });
+
     </script>
 </x-app-layout>

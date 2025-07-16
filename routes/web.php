@@ -10,11 +10,12 @@ Route::get('/', function () {
     return redirect('/login');
 });
 
-Route::get('/dashboard', [ProformaInvoiceController::class, 'SummaryPI'])->middleware(['auth'])->name('dashboard');
+Route::get('/dashboard', [ProformaInvoiceController::class, 'SummaryPI'])->middleware(['auth'])->name('dashboard.index');
 Route::get('/PI', [ProformaInvoiceController::class, 'index'])->middleware(['auth'])->name('proformaInvoice.index');
 Route::get('/proforma-invoice/{id}/detail', [ProformaInvoiceController::class, 'show'])->name('proformaInvoice.show');
 Route::post('/jobcontrols/store-or-update', [JobControlController::class, 'storeOrUpdate'])->name('jobcontrols.storeOrUpdate');
 Route::put('/products/{id}/toggle-status', [ProductController::class, 'toggleStatus'])->name('products.toggleStatus');
+Route::get('/dashboard/detail/{id}', [ProductController::class, 'show'])->name('dashboard.detail');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

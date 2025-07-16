@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\JobControl;
+use Carbon\Carbon;
 
 class JobControlController extends Controller
 {
@@ -18,11 +19,11 @@ class JobControlController extends Controller
             'QtyReceive' => 'nullable|numeric',
             'TotalWeightBefore' => 'nullable|numeric',
             'TotalWeightAfter' => 'nullable|numeric',
-            'AssignDate' => 'nullable|date',
-            'ScheduleDate' => 'nullable|date',
-            'ReceiveDate' => 'nullable|date',
+            'AssignDate' => 'nullable|string',
+            'ScheduleDate' => 'nullable|string',
+            'ReceiveDate' => 'nullable|string',
         ]);
-
+        $convertDate = fn($date) => $date ? Carbon::createFromFormat('d-m-Y', $date)->format('Y-m-d') : null;
         $jobControl = JobControl::updateOrCreate(
             [
                 'product_id' => $validated['product_id'],
@@ -35,12 +36,12 @@ class JobControlController extends Controller
                 'QtyReceive' => $validated['QtyReceive'],
                 'TotalWeightBefore' => $validated['TotalWeightBefore'],
                 'TotalWeightAfter' => $validated['TotalWeightAfter'],
-                'AssignDate' => $validated['AssignDate'],
-                'ScheduleDate' => $validated['ScheduleDate'],
-                'ReceiveDate' => $validated['ReceiveDate'],
+                'AssignDate' => $convertDate($validated['AssignDate']),
+                'ScheduleDate' => $convertDate($validated['ScheduleDate']),
+                'ReceiveDate' => $convertDate($validated['ReceiveDate']),
             ]
         );
 
-        return back()->with('success', 'JobControl saved successfully.');
+        return back()->with('success', 'ข้อมูลของJobControlได้ถูกบันทึกแล้ว');
     }
 }
