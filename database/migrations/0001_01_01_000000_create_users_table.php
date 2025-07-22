@@ -17,6 +17,7 @@ return new class extends Migration
             $table->string('username')->unique();
             $table->string('password');
             $table->string('productionID')->nullable();
+            $table->string('salesID')->nullable();
             $table->enum('role', ['Admin', 'Production', 'Head', 'Sales'])->default('Production');
             $table->rememberToken();
             $table->timestamps();

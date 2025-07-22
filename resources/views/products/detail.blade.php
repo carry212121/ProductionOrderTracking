@@ -3,42 +3,18 @@
         <nav class="text-sm text-gray-600 flex items-center space-x-2">
             <a href="{{ route('proformaInvoice.index') }}" class="hover:underline text-blue-600">รายการ Proforma Invoice</a>
             <span>/</span>
-            <span class="text-gray-800 font-medium">รายการสินค้าของ {{ $pi->PInumber }}</span>
+            <a href="{{ route('products.list', ['id' => $pi->id]) }}" class="hover:underline text-blue-600">รายการสินค้าของ {{ $pi->PInumber }}</a>
+            <span>/</span>
+            <span class="text-gray-800 font-medium">รายละเอียดสินค้า: {{ $product->ProductNumber }}</span>
         </nav>
     </x-slot>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <div class="flex justify-between items-center px-6 mt-4 gap-4 flex-wrap">
-        <h2 class="text-xl font-semibold text-gray-800 leading-tight">
-            รายการสินค้าของ Proforma Invoice: {{ $pi->PInumber }}
-        </h2>
-        <p>
-            วันกำหนดรับ: 
-            {{ $pi->ScheduleDate ? \Carbon\Carbon::parse($pi->ScheduleDate)->format('d-m-Y') : '-' }}
-        </p>
-        <div class="flex items-center gap-2">
-            <x-filter toggleId="filterToggleBtn" panelId="filterPanel">
-                <button class="filter-option w-full text-left hover:bg-gray-200 px-2 py-1" data-filter="all">📦 แสดงทั้งหมด</button>
-                <button class="filter-option w-full text-left hover:bg-yellow-100 px-2 py-1" data-filter="yellow">🟡 ช้า 1–7 วัน</button>
-                <button class="filter-option w-full text-left hover:bg-red-100 px-2 py-1" data-filter="red">🔴 ช้า 8–14 วัน</button>
-                <button class="filter-option w-full text-left hover:bg-red-400 px-2 py-1" data-filter="darkred">🟥 ช้าเกิน 15 วัน</button>
-            </x-filter>
-            <x-search-bar id="product-search" placeholder="ค้นหารหัสสินค้า/สินค้าลูกค้า..." class="w-64" />
-        </div>
-
-    </div>
-
-    <div id="no-result-message" class="text-center text-gray-500 mt-6 hidden">
-        ไม่พบรหัสสินค้า/สินค้าลูกค้าที่ค้นหา
-    </div>
-    <div id="no-results" class="text-gray-500 text-center my-4 hidden">
-        ไม่พบรายการสินค้าที่ตรงกับตัวกรอง
-    </div>
 
     <div class="px-6 py-4 space-y-6">
-        @foreach($pi->products as $index => $product)
+        {{-- @foreach($pi->products as $index => $product) --}}
                 @php
                     $processOrder = ['Casting' => 'หล่อ', 'Stamping' => 'ปั้ม', 'Trimming' => 'แต่ง', 'Polishing' => 'ขัด', 'Setting' => 'ฝัง', 'Plating' => 'ชุบ'];
                     $jobControls = $product->jobControls->keyBy('Process');
@@ -82,7 +58,7 @@
                         {{-- ✅ Column 1: รายละเอียดสินค้า --}}
                         <div>
                             <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดสินค้า</h3>
-                            <p>ลำดับที่: {{ $index + 1 }}</p>
+                            {{-- <p>ลำดับที่: {{ $index + 1 }}</p> --}}
                             <p>รหัสสินค้า: {{ $product->ProductNumber }}</p>
                             <p>รหัสสินค้าลูกค้า: {{ $product->ProductCustomerNumber }}</p>
                             <p>จำนวน: {{ $product->Quantity }}</p>
@@ -281,7 +257,7 @@
                         </div>
                     </div>
                 </div>
-        @endforeach
+        {{-- @endforeach --}}
     </div>
 
     <script>

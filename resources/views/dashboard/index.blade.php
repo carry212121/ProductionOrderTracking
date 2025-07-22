@@ -1,7 +1,10 @@
 <x-app-layout>
+    @php
+        $label = $viewBy === 'product' ? 'สินค้า' : 'Proforma invoice';
+    @endphp
     <x-slot name="header">
         <nav class="text-sm text-gray-600 flex items-center space-x-2">
-            <span class="text-gray-800 font-medium">สรุปรายการ Proforma Invoice</span>
+            <span class="text-gray-800 font-medium">สรุปรายการ {{ $label }}</span>
         </nav>
     </x-slot>
 
@@ -11,9 +14,26 @@
             <!-- Block #1 -->
             <div class="bg-white shadow-xl sm:rounded-lg p-6 w-full md:w-1/2">
                 <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-semibold">ภาพรวม Proforma invoice</h3>
+                    <h3 class="text-lg font-semibold">ภาพรวม {{ $label }}</h3>
+                    <form method="GET" action="{{ route('dashboard.index') }}" class="flex items-center space-x-2">
+                        <input type="hidden" name="month" value="{{ $selectedMonth }}">
+                        <input type="hidden" name="groupBy" value="{{ $groupBy }}">
+                        <label for="viewBy" class="text-sm text-gray-700">ดูภาพรวม:</label>
+                        <select name="viewBy" id="viewBy" onchange="this.form.submit()" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                            <option value="pi" {{ request('viewBy', 'pi') === 'pi' ? 'selected' : '' }}>PI</option>
+                            <option value="product" {{ request('viewBy') === 'product' ? 'selected' : '' }}>Product</option>
+                        </select>
+                    </form>
+                    {{-- @if ($viewBy === 'product')
+                        <div class="flex justify-end">
+                            <a href="{{ route('dashboard.productProcess') }}" class="text-blue-600 hover:underline text-sm font-medium">
+                                กระบวนการสินค้า
+                            </a>
+                        </div>
+                    @endif --}}
                     <!-- Filter Form -->
                     <form method="GET" action="{{ route('dashboard.index') }}" id="monthFilterForm" class="flex items-center space-x-2">
+                        <input type="hidden" name="viewBy" value="{{ request('viewBy', 'pi') }}">
                         <label for="month" class="font-medium text-gray-700 text-sm">เลือกเดือน:</label>
                         <select name="month" id="month" onchange="document.getElementById('monthFilterForm').submit()" class="border border-gray-300 rounded px-3 py-1 text-sm">
                             <option value="">ทุกเดือน</option>
@@ -30,15 +50,15 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div class="bg-gray-100 rounded p-4 text-center">
-                        <p class="text-sm text-gray-500">PI ทั้งหมด</p>
+                        <p class="text-sm text-gray-500">{{ $label }} ทั้งหมด</p>
                         <p class="text-2xl font-bold">{{ $total }}</p>
                     </div>
                     <div class="bg-green-100 rounded p-4 text-center">
-                        <p class="text-sm text-gray-500">PI ที่ตรงเวลา</p>
+                        <p class="text-sm text-gray-500">{{ $label }} ที่ตรงเวลา</p>
                         <p class="text-2xl font-bold text-green-700">{{ $onTime }}</p>
                     </div>
                     <div class="bg-red-100 rounded p-4 text-center">
-                        <p class="text-sm text-gray-500">PI ที่เลท</p>
+                        <p class="text-sm text-gray-500">{{ $label }} ที่เลท</p>
                         <p class="text-2xl font-bold text-red-700">{{ $late }}</p>
                     </div>
                 </div>
@@ -48,10 +68,11 @@
             <div class="bg-white shadow-xl sm:rounded-lg p-6 w-full md:w-1/2">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold">
-                        รายการ Proforma invoice ตาม{{ $groupBy === 'production' ? 'ผู้รับผิดชอบ Production' : 'โรงงาน' }}
+                        รายการ {{ $label }} ตาม{{ $groupBy === 'production' ? 'ผู้รับผิดชอบ Production' : 'โรงงาน' }}
                     </h3>
                     <form method="GET" action="{{ route('dashboard.index') }}" class="flex items-center space-x-2">
                         <input type="hidden" name="month" value="{{ $selectedMonth }}">
+                        <input type="hidden" name="viewBy" value="{{ request('viewBy', 'pi') }}">
                         <label for="groupBy" class="text-sm text-gray-700">แสดงตาม:</label>
                         <select name="groupBy" id="groupBy" onchange="this.form.submit()" class="border border-gray-300 rounded px-2 py-1 text-sm">
                             <option value="factory" {{ $groupBy === 'factory' ? 'selected' : '' }}>โรงงาน</option>
@@ -63,7 +84,7 @@
                     <ul class="list-disc pl-6 text-sm text-gray-800 space-y-1">
                         @forelse ($grouped as $id => $name)
                             <li>
-                                <a href="{{ route('dashboard.detail', ['id' => $id, 'groupBy' => $groupBy]) }}" class="text-blue-600 hover:underline">
+                                <a href="{{ route('dashboard.detail', ['id' => $id, 'groupBy' => $groupBy, 'label' => $label]) }}" class="text-blue-600 hover:underline">
                                     {{ $name }}
                                 </a>
                             </li>
@@ -77,12 +98,12 @@
         <div class="flex flex-col md:flex-row gap-6">
             <!-- Block #2: Pie Chart -->
             <div class="bg-white shadow-xl sm:rounded-lg p-6 w-full md:w-1/2 mt-6">
-                <h3 class="text-lg font-semibold mb-4">สัดส่วน PI ตรงเวลา vs เลท</h3>
+                <h3 class="text-lg font-semibold mb-4">สัดส่วน {{ $label }} ตรงเวลา vs เลท</h3>
                 <canvas id="piStatusPieChart" width="400" height="300"></canvas>
             </div>
             <div class="bg-white shadow-xl sm:rounded-lg p-6 w-full md:w-1/2 mt-6">
                 <h3 class="text-lg font-semibold mb-4">
-                    กราฟเปรียบเทียบ PI ตรงเวลา/เลท ตาม{{ $groupBy === 'production' ? 'Production' : 'โรงงาน' }}
+                    กราฟเปรียบเทียบ {{ $label }} ตรงเวลา/เลท ตาม{{ $groupBy === 'production' ? 'Production' : 'โรงงาน' }}
                 </h3>
                 <canvas id="barChartPiStatus" width="400" height="300"></canvas>
                 @if ($totalPages > 1)
@@ -109,7 +130,7 @@
         new Chart(ctx, {
             type: 'pie',
             data: {
-                labels: ['PI ตรงเวลา', 'เลท 1-7 วัน', 'เลท 8-14 วัน', 'เลทเกิน 15 วัน'],
+                labels: ['{{ $label }} ตรงเวลา', 'เลท 1-7 วัน', 'เลท 8-14 วัน', 'เลทเกิน 15 วัน'],
                 datasets: [{
                     label: 'จำนวน',
                     data: [{{ $onTime }}, {{ $lateYellow }}, {{ $lateRed }}, {{ $lateDarkRed }}],
@@ -187,7 +208,7 @@
                         beginAtZero: true,
                         title: {
                             display: true,
-                            text: 'จำนวน PI'
+                            text: 'จำนวน {{ $label }}'
                         }
                     }
                 }

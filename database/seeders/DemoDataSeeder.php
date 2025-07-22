@@ -26,28 +26,40 @@ class DemoDataSeeder extends Seeder
             ]));
         }
 
-        // 2. Create 10 Production Users
+        // 2. Create Production Users
+        $productions = collect([
+            ['username' => 'Supa', 'name' => 'Supa YO', 'productionID' => 'YO'],
+            ['username' => 'Nuallao', 'name' => 'Nuallao NU', 'productionID' => 'NU'],
+            ['username' => 'Montien', 'name' => 'Montien MT', 'productionID' => 'MT'],
+            ['username' => 'Duangjai', 'name' => 'Duangjai DJ', 'productionID' => 'DJ'],
+            ['username' => 'Jintana', 'name' => 'Jintana NA', 'productionID' => 'NA'],
+            ['username' => 'Penprapa', 'name' => 'Penprapa PN', 'productionID' => 'PN'],
+        ]);
         $productionUsers = collect();
-        for ($i = 1; $i <= 10; $i++) {
-            $productionUsers->push(User::create([
-                'name' => "Production User $i",
-                'username' => "production$i",
-                'password' => Hash::make("production123"),
-                'productionID' => "P00$i",
+        foreach ($productions as $prod) {
+            $user = User::create([
+                'username' => $prod['username'],
+                'name' => $prod['name'],
+                'password' => Hash::make('production123'),
+                'productionID' => $prod['productionID'],
                 'role' => 'Production',
-            ]));
+            ]);
+
+            $productionUsers->push($user);
         }
 
         $allNextProcesses = ['Trimming', 'Polishing', 'Setting', 'Plating'];
-
+        $salesUsers = User::where('role', 'Sales')->get();
         // 3. Create 100 PIs
         for ($i = 1; $i <= 100; $i++) {
-            $user = $productionUsers->random();
-
+            $productionUser = $productionUsers->random();
+            $salesUser = $salesUsers->random();
+            $randomOrderCode = strtoupper(Str::random(3));
+            $customerID = "{$randomOrderCode}-{$salesUser->salesID}/{$productionUser->productionID}";
             $pi = ProformaInvoice::create([
                 'PInumber' => "PI-" . str_pad($i, 4, '0', STR_PAD_LEFT),
                 'byOrder' => 'Order-' . $i,
-                'CustomerID' => 'CUST-' . rand(1000, 9999),
+                'CustomerID' => $customerID,
                 'CustomerPO' => 'PO-' . Str::random(5),
                 'CustomerInstruction' => 'Handle with care',
                 'FOB' => rand(100, 500),
@@ -57,8 +69,8 @@ class DemoDataSeeder extends Seeder
                 'OrderDate' => Carbon::now()->subDays(rand(1, 60)),
                 'ScheduleDate' => null,
                 'CompletionDate' => null,
-                'SalesPerson' => 2,
-                'user_id' => $user->id,
+                'SalesPerson' => $salesUser->id,
+                'user_id' => $productionUser->id,
             ]);
 
             Log::info("🔁 Generating data for PI: {$pi->PInumber}");
@@ -94,15 +106,11 @@ class DemoDataSeeder extends Seeder
                     // ReceiveDate: random from past 30 days
                     $receiveDate = Carbon::now()->subDays(rand(0, 30));
 
-                    // AssignDate: 50% chance before/after receive date
-                    $assignDate = rand(0, 1)
-                        ? $receiveDate->copy()->subDays(rand(1, 5))
-                        : $receiveDate->copy()->addDays(rand(1, 5));
+                    // AssignDate: before ReceiveDate
+                    $assignDate = $receiveDate->copy()->subDays(rand(1, 3));
 
-                    // ScheduleDate: 50% chance before/after receive date
-                    $scheduleDate = rand(0, 1)
-                        ? $receiveDate->copy()->subDays(rand(1, 3))
-                        : $receiveDate->copy()->addDays(rand(1, 3));
+                    // ScheduleDate: after AssignDate
+                    $scheduleDate = $assignDate->copy()->addDays(rand(2, 5));
 
                     // Duration for reference use (not needed for assigning dates here)
                     $duration = match ($process) {

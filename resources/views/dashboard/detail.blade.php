@@ -1,12 +1,43 @@
 <x-app-layout>
     <x-slot name="header">
         <nav class="text-sm text-gray-600 flex items-center space-x-2">
-            <a href="{{ route('dashboard.index') }}" class="hover:underline text-blue-600">สรุปรายการ Proforma Invoice</a>
+            <a href="{{ route('dashboard.index') }}" class="hover:underline text-blue-600">สรุปรายการ {{ request('label', 'Proforma invoice') }}</a>
             <span>/</span>
             <span class="text-gray-800 font-medium">รายการสินค้าของ {{ $sourceName }}</span>
         </nav>
     </x-slot>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Product Detail Modal -->
+    <div id="productModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
+        <div class="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 relative">
+            <!-- Close Button -->
+            <button onclick="closeProductModal()" class="absolute top-2 right-3 text-gray-600 hover:text-red-600 text-xl">&times;</button>
+            <h3 class="text-lg font-bold mb-4 text-center">รายละเอียดสินค้า</h3>
+
+            <!-- Flex layout: Left details, Right image -->
+            <div class="flex flex-col md:flex-row gap-6">
+                <!-- Left Side: Details -->
+                <div class="space-y-2 text-sm flex-1">
+                    <p><strong>รหัส PI:</strong> <span id="modalPInumber"></span></p>
+                    <p><strong>รหัสสินค้า:</strong> <span id="modalProductNumber"></span></p>
+                    <p><strong>รายละเอียดสินค้า:</strong> <span id="modalDescription"></span></p>
+                    <p><strong>รหัสสินค้าลูกค้า:</strong> <span id="modalProductCustomerNumber"></span></p>
+                    <p><strong>น้ำหนัก:</strong> <span id="modalWeight"></span></p>
+                    <p><strong>จำนวน:</strong> <span id="modalQuantity"></span></p>
+                    <p><strong>หน่วยต่อราคา:</strong> <span id="modalUnitPrice"></span></p>
+                </div>
+
+                <!-- Right Side: Image -->
+                <div class="flex-1 flex justify-center items-center">
+                    <img id="modalImage" src="" alt="Product Image"
+                        class="w-full max-w-xs max-h-72 object-contain border rounded shadow"
+                        onerror="this.src='/images/default-product.jpg';">
+                </div>
+            </div>
+        </div>
+    </div>
+
+
     <div class="flex justify-between items-center px-6 mt-4 gap-4 flex-wrap">
         <h2 class="text-xl font-semibold text-gray-800 leading-tight">
             รายการสินค้าของ {{ $sourceName }}
@@ -18,7 +49,7 @@
                 <button class="filter-option w-full text-left hover:bg-red-100 px-2 py-1" data-filter="red">🔴 ช้า 8–14 วัน</button>
                 <button class="filter-option w-full text-left hover:bg-red-400 px-2 py-1" data-filter="darkred">🟥 ช้าเกิน 15 วัน</button>
             </x-filter>
-            <x-search-bar id="product-search" placeholder="ค้นหารหัสสินค้า..." class="w-64" />
+            <x-search-bar id="product-search" placeholder="ค้นหารหัสสินค้า/PI..." class="w-64" />
         </div>
     </div>
     @if($products->isNotEmpty())
@@ -107,15 +138,21 @@
                                     }
                                 @endphp
 
-                                <div class="border rounded-lg shadow p-4 {{ $bgClass }} hover:shadow-lg transition product-card "
+                                <div onclick="showProductModal(this)" class="border rounded-lg shadow p-4 {{ $bgClass }} hover:shadow-lg transition product-card "
                                     data-product-number="{{ $product->ProductNumber }}"
                                     data-month="{{ optional($product->proformaInvoice?->created_at)->format('Y-m') }}"
                                     data-pi-number="{{ $product->proformaInvoice?->PInumber ?? '-' }}"
-                                        data-status="{{ 
+                                    data-status="{{ 
                                         $bgClass === 'bg-red-400' ? 'darkred' : 
                                         ($bgClass === 'bg-red-200' ? 'red' : 
                                         ($bgClass === 'bg-yellow-100' ? 'yellow' : 'ontime')) 
-                                    }}">
+                                    }}"
+                                    data-description="{{ $product->Description }}"
+                                    data-product-customer-number="{{ $product->ProductCustomerNumber }}"
+                                    data-weight="{{ $product->Weight }}"
+                                    data-quantity="{{ $product->Quantity }}"
+                                    data-unit-price="{{ $product->UnitPrice }}"
+                                    data-image="{{ $product->Image }}">
                                     <p class="text-sm text-gray-700 font-semibold">PI Number:</p>
                                     <p class="text-sm text-gray-800 mb-1">
                                         {{ $product->proformaInvoice?->PInumber ?? '-' }}
@@ -191,19 +228,31 @@
         document.addEventListener('DOMContentLoaded', () => {
             let selectedMonth = 'all';
             let selectedStatus = 'all';
-
+            let searchTerm = '';
+            const searchInput = document.getElementById('product-search');
+            const cards = document.querySelectorAll('.product-card');
             const updateView = () => {
                 const cards = document.querySelectorAll('.product-card');
                 let onTime = 0, yellow = 0, red = 0, darkred = 0, total = 0, visibleCount = 0;
-
+                // console.log('🔍 Filter values →', {
+                //     selectedMonth,
+                //     selectedStatus,
+                //     searchTerm
+                // });
                 cards.forEach(card => {
                     const month = card.dataset.month;
                     const status = card.dataset.status;
-
+                    const productNumber = card.dataset.productNumber.toLowerCase();
+                    const piNumber = card.dataset.piNumber.toLowerCase();
+                    
                     const matchMonth = selectedMonth === 'all' || month === selectedMonth;
                     const matchStatus = selectedStatus === 'all' || status === selectedStatus;
+                    const search = searchTerm.toLowerCase();
+                    const matchSearch = !search || productNumber.includes(search) || piNumber.includes(search);
 
-                    if (matchMonth && matchStatus) {
+                    // console.log(`📦 Checking card → PI: ${piNumber}, Product: ${productNumber}`);
+                    // console.log(`✅ Match → month: ${matchMonth}, status: ${matchStatus}, search: ${matchSearch}`);
+                    if (matchMonth && matchStatus && matchSearch) {
                         card.classList.remove('hidden');
                         visibleCount++;
                         total++;
@@ -215,7 +264,7 @@
                         card.classList.add('hidden');
                     }
                 });
-
+                // console.log(`👀 Visible cards: ${visibleCount}`);
                 document.getElementById('totalCount').innerText = total;
                 document.getElementById('onTimeCount').innerText = onTime;
                 document.getElementById('lateCount').innerText = yellow + red + darkred;
@@ -223,8 +272,17 @@
                 latenessChart.data.datasets[0].data = [onTime, yellow, red, darkred];
                 latenessChart.update();
 
-                const noResult = document.getElementById('no-results');
-                noResult.classList.toggle('hidden', visibleCount !== 0);
+                const noResultFilter = document.getElementById('no-results');
+                const noResultSearch = document.getElementById('no-result-message');
+
+                const hasSearch = searchTerm.trim().length > 0;
+                const hasFilter = selectedMonth !== 'all' || selectedStatus !== 'all';
+
+                // Only show search-related message when there's a search term and no results
+                noResultSearch.classList.toggle('hidden', !(hasSearch && visibleCount === 0));
+
+                // Only show filter-related message when there's a filter but no search term
+                noResultFilter.classList.toggle('hidden', !(hasFilter && !hasSearch && visibleCount === 0));
             };
 
             // Handle month filter
@@ -241,6 +299,11 @@
                 });
             });
 
+            searchInput.addEventListener('input', (e) => {
+                searchTerm = e.target.value.trim();
+                updateView();
+            });
+
             // Toggle filter panel
             const toggleBtn = document.getElementById('filterToggleBtn');
             const panel = document.getElementById('filterProductPanel');
@@ -253,6 +316,44 @@
 
             document.addEventListener('click', () => {
                 panel.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+            });
+        });
+        function showProductModal(card) {
+            document.getElementById('modalPInumber').innerText = card.dataset.piNumber || '-';
+            document.getElementById('modalProductNumber').innerText = card.dataset.productNumber || '-';
+            document.getElementById('modalDescription').innerText = card.dataset.description || '-';
+            document.getElementById('modalProductCustomerNumber').innerText = card.dataset.productCustomerNumber || '-';
+            document.getElementById('modalWeight').innerText = card.dataset.weight || '-';
+            document.getElementById('modalQuantity').innerText = card.dataset.quantity || '-';
+            document.getElementById('modalUnitPrice').innerText = card.dataset.unitPrice || '-';
+            
+            const modalImage = document.getElementById('modalImage');
+            const imgSrc = card.dataset.image || '';
+            modalImage.src = imgSrc ? `/storage/app/public/product_images/${imgSrc}` : '/images/default-product.jpg';
+            modalImage.onerror = () => {
+                modalImage.src = '/images/default-product.jpg';
+            };
+
+
+            document.getElementById('productModal').classList.remove('hidden');
+            document.getElementById('productModal').classList.add('flex');
+        }
+
+        function closeProductModal() {
+            document.getElementById('productModal').classList.add('hidden');
+            document.getElementById('productModal').classList.remove('flex');
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+
+            // Modal close on outside click
+            const modal = document.getElementById('productModal');
+            const modalContent = modal.querySelector('.bg-white');
+
+            modal.addEventListener('click', function (e) {
+                // If the clicked target is NOT inside the modal content, close it
+                if (!modalContent.contains(e.target)) {
+                    closeProductModal();
+                }
             });
         });
     </script>
