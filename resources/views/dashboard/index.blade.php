@@ -16,7 +16,8 @@
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold">ภาพรวม {{ $label }}</h3>
                     <form method="GET" action="{{ route('dashboard.index') }}" class="flex items-center space-x-2">
-                        <input type="hidden" name="month" value="{{ $selectedMonth }}">
+                        <input type="hidden" name="start_month" value="{{ $startMonth }}">
+                        <input type="hidden" name="end_month" value="{{ $endMonth }}">
                         <input type="hidden" name="groupBy" value="{{ $groupBy }}">
                         <label for="viewBy" class="text-sm text-gray-700">ดูภาพรวม:</label>
                         <select name="viewBy" id="viewBy" onchange="this.form.submit()" class="border border-gray-300 rounded px-2 py-1 text-sm">
@@ -32,16 +33,36 @@
                         </div>
                     @endif --}}
                     <!-- Filter Form -->
+                    @php
+                        $currentYear = now()->year;
+                        $defaultStart = $currentYear . '-01';
+                        $defaultEnd = $currentYear . '-12';
+                        $selectedStart = request('start_month') ?? $defaultStart;
+                        $selectedEnd = request('end_month') ?? $defaultEnd;
+                    @endphp
+
                     <form method="GET" action="{{ route('dashboard.index') }}" id="monthFilterForm" class="flex items-center space-x-2">
                         <input type="hidden" name="viewBy" value="{{ request('viewBy', 'pi') }}">
-                        <label for="month" class="font-medium text-gray-700 text-sm">เลือกเดือน:</label>
-                        <select name="month" id="month" onchange="document.getElementById('monthFilterForm').submit()" class="border border-gray-300 rounded px-3 py-1 text-sm">
-                            <option value="">ทุกเดือน</option>
+
+                        <label for="start_month" class="font-medium text-gray-700 text-sm">ตั้งแต่:</label>
+                        <select name="start_month" id="start_month" onchange="document.getElementById('monthFilterForm').submit()" class="border border-gray-300 rounded px-3 py-1 text-sm">
                             @for ($m = 1; $m <= 12; $m++)
                                 @php
-                                    $monthStr = now()->year . '-' . str_pad($m, 2, '0', STR_PAD_LEFT);
+                                    $monthStr = $currentYear . '-' . str_pad($m, 2, '0', STR_PAD_LEFT);
                                 @endphp
-                                <option value="{{ $monthStr }}" {{ $selectedMonth === $monthStr ? 'selected' : '' }}>
+                                <option value="{{ $monthStr }}" {{ $selectedStart === $monthStr ? 'selected' : '' }}>
+                                    {{ \Carbon\Carbon::parse($monthStr . '-01')->locale('th')->isoFormat('MMMM YYYY') }}
+                                </option>
+                            @endfor
+                        </select>
+
+                        <label for="end_month" class="font-medium text-gray-700 text-sm">ถึง:</label>
+                        <select name="end_month" id="end_month" onchange="document.getElementById('monthFilterForm').submit()" class="border border-gray-300 rounded px-3 py-1 text-sm">
+                            @for ($m = 1; $m <= 12; $m++)
+                                @php
+                                    $monthStr = $currentYear . '-' . str_pad($m, 2, '0', STR_PAD_LEFT);
+                                @endphp
+                                <option value="{{ $monthStr }}" {{ $selectedEnd === $monthStr ? 'selected' : '' }}>
                                     {{ \Carbon\Carbon::parse($monthStr . '-01')->locale('th')->isoFormat('MMMM YYYY') }}
                                 </option>
                             @endfor
@@ -53,13 +74,13 @@
                         <p class="text-sm text-gray-500">{{ $label }} ทั้งหมด</p>
                         <p class="text-2xl font-bold">{{ $total }}</p>
                     </div>
-                    <div class="bg-green-100 rounded p-4 text-center">
-                        <p class="text-sm text-gray-500">{{ $label }} ที่ตรงเวลา</p>
-                        <p class="text-2xl font-bold text-green-700">{{ $onTime }}</p>
-                    </div>
                     <div class="bg-red-100 rounded p-4 text-center">
                         <p class="text-sm text-gray-500">{{ $label }} ที่เลท</p>
                         <p class="text-2xl font-bold text-red-700">{{ $late }}</p>
+                    </div>
+                    <div class="bg-green-100 rounded p-4 text-center">
+                        <p class="text-sm text-gray-500">{{ $label }} ที่ตรงเวลา</p>
+                        <p class="text-2xl font-bold text-green-700">{{ $onTime }}</p>
                     </div>
                 </div>
             </div>
@@ -71,7 +92,8 @@
                         รายการ {{ $label }} ตาม{{ $groupBy === 'production' ? 'ผู้รับผิดชอบ Production' : 'โรงงาน' }}
                     </h3>
                     <form method="GET" action="{{ route('dashboard.index') }}" class="flex items-center space-x-2">
-                        <input type="hidden" name="month" value="{{ $selectedMonth }}">
+                        <input type="hidden" name="start_month" value="{{ $startMonth }}">
+                        <input type="hidden" name="end_month" value="{{ $endMonth }}">
                         <input type="hidden" name="viewBy" value="{{ request('viewBy', 'pi') }}">
                         <label for="groupBy" class="text-sm text-gray-700">แสดงตาม:</label>
                         <select name="groupBy" id="groupBy" onchange="this.form.submit()" class="border border-gray-300 rounded px-2 py-1 text-sm">
@@ -110,7 +132,8 @@
                     <div class="mt-4 flex justify-center gap-2">
                         @for ($i = 1; $i <= $totalPages; $i++)
                             <form method="GET" action="{{ route('dashboard.index') }}">
-                                <input type="hidden" name="month" value="{{ $selectedMonth }}">
+                                <input type="hidden" name="start_month" value="{{ $startMonth }}">
+                                <input type="hidden" name="end_month" value="{{ $endMonth }}">
                                 <input type="hidden" name="groupBy" value="{{ $groupBy }}">
                                 <input type="hidden" name="barPage" value="{{ $i }}">
                                 <button type="submit" class="px-3 py-1 border rounded {{ $i == $page ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700' }}">

@@ -13,11 +13,27 @@ use Illuminate\Support\Facades\Log;
 
 class ProductController extends Controller
 {
+
     public function toggleStatus(Request $request, $id)
     {
         $product = Product::findOrFail($id);
+        $oldStatus = $product->Status;
         $product->Status = $request->status;
         $product->save();
+
+        $pi = $product->proformaInvoice;
+
+        if ($pi) {
+            if ($request->status === 'Finish') {
+                // ✅ If changed to Finish, check if all products in this PI are now Finish
+                $allFinished = $pi->products()->where('Status', '!=', 'Finish')->count() === 0;
+                $pi->CompletionDate = $allFinished ? Carbon::today() : null;
+            } elseif ($oldStatus === 'Finish' && $request->status !== 'Finish') {
+                // 🔄 If changing from Finish to something else, clear CompletionDate
+                $pi->CompletionDate = null;
+            }
+            $pi->save();
+        }
 
         return back()->with('success', 'สถานะของสินค้าได้รับการอัปเดตแล้ว');
     }
@@ -26,13 +42,13 @@ class ProductController extends Controller
         $groupBy = $request->query('groupBy', 'factory'); // 'factory' or 'production'
 
         if ($groupBy === 'production') {
-            $products = Product::with('proformaInvoice.user')
+            $products = Product::with(['proformaInvoice.user', 'jobControls'])
                 ->where('Status', '!=', 'Finish')
-                ->whereHas('proformaInvoice', function ($query) use ($id) {
-                    $query->where('user_id', $id);
-                })->get();
+                ->whereHas('proformaInvoice', fn($query) => $query->where('user_id', $id))
+                ->get();
 
             $sourceName = User::find($id)?->name ?? 'ไม่ทราบชื่อ';
+
         } else {
             $jobControls = JobControl::with(['product.proformaInvoice', 'factory'])
                 ->where('factory_id', $id)
@@ -40,29 +56,32 @@ class ProductController extends Controller
 
             $products = $jobControls->pluck('product')
                 ->filter()
-                ->filter(fn($product) => $product->Status !== 'Finish') // ✅ Exclude finished
+                ->filter(fn($product) => $product->Status !== 'Finish')
                 ->unique('id')
                 ->values();
 
-
             $sourceName = Factory::find($id)?->FactoryName ?? 'ไม่ทราบชื่อ';
         }
+
         $today = Carbon::today();
         $lateYellow = 0;
         $lateRed = 0;
         $lateDarkRed = 0;
         $onTime = 0;
+        $processOrder = ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'];
 
         foreach ($products as $product) {
-            $processOrder = ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'];
             $jobControls = $product->jobControls->keyBy('Process');
-
             $latestProcess = null;
+
             foreach ($processOrder as $process) {
                 if (!empty($jobControls[$process]?->AssignDate)) {
                     $latestProcess = $process;
                 }
             }
+
+            $daysLate = 0;
+            $isLate = false;
 
             if ($latestProcess && isset($jobControls[$latestProcess])) {
                 $job = $jobControls[$latestProcess];
@@ -71,39 +90,66 @@ class ProductController extends Controller
 
                 if ($scheduleDate && $scheduleDate->lt($today) && !$receiveDate) {
                     $daysLate = $scheduleDate->diffInDays($today);
-                    if ($daysLate >= 15) $lateDarkRed++;
-                    elseif ($daysLate >= 8) $lateRed++;
-                    elseif ($daysLate >= 1) $lateYellow++;
-                } else {
-                    $onTime++;
+                    $isLate = true;
+                }
+            }
+
+            // Fallback: use PI ScheduleDate if not late by process
+            if (!$isLate && $product->proformaInvoice && $product->proformaInvoice->ScheduleDate) {
+                $piSchedule = Carbon::parse($product->proformaInvoice->ScheduleDate);
+                if ($piSchedule->lt($today)) {
+                    $daysLate = $piSchedule->diffInDays($today);
+                    $isLate = true;
+                }
+            }
+
+            $product->daysLate = $daysLate;
+
+            // Classification
+            if ($isLate) {
+                if ($daysLate >= 15) {
+                    $lateDarkRed++;
+                    $product->late_status = 'darkred';
+                } elseif ($daysLate >= 8) {
+                    $lateRed++;
+                    $product->late_status = 'red';
+                } elseif ($daysLate >= 1) {
+                    $lateYellow++;
+                    $product->late_status = 'yellow';
                 }
             } else {
-                $onTime++; // Treat as on-time if no process info
+                $onTime++;
+                $product->late_status = 'ontime';
             }
         }
+        $products = $products->sortByDesc(fn($product) => $product->daysLate ?? 0)->values();
+        // 🔁 Log lateness summary for each product
+        // foreach ($products as $product) {
+        //     Log::info("🕓 Product {$product->ProductNumber} | Status: {$product->late_status} | Days Late: {$product->daysLate}");
+        // }
 
+        // Extract years/months for filter options
         $invoiceDates = $products->pluck('proformaInvoice.created_at')->filter();
-
         $years = $invoiceDates
-            ->map(fn($date) => \Carbon\Carbon::parse($date)->year)
+            ->map(fn($date) => Carbon::parse($date)->year)
             ->unique()
             ->sort()
             ->values();
 
         $availableMonths = collect();
-
         foreach ($years as $year) {
             for ($month = 1; $month <= 12; $month++) {
                 $availableMonths->push(Carbon::createFromDate($year, $month, 1)->format('Y-m'));
             }
         }
-        $totalLate = $lateYellow + $lateRed + $lateDarkRed;
-        // Log::info("🟡 Late Yellow: $lateYellow | 🔴 Late Red: $lateRed | 🟥 Late DarkRed: $lateDarkRed | 🧮 Total Late: $totalLate");
+
         return view('dashboard.detail', compact(
             'products', 'groupBy', 'sourceName',
             'onTime', 'lateYellow', 'lateRed', 'lateDarkRed', 'availableMonths'
         ));
     }
+
+
 
     public function productProcess()
     {

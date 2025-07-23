@@ -17,8 +17,8 @@ return new class extends Migration
             $table->enum('Process', ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'])->default('Casting');
             $table->integer('QtyOrder')->nullable();
             $table->integer('QtyReceive')->nullable();
-            $table->float('TotalWeightBefore', 10, 2)->nullable();
-            $table->float('TotalWeightAfter', 10, 2)->nullable();
+            // $table->float('TotalWeightBefore', 10, 2)->nullable();
+            // $table->float('TotalWeightAfter', 10, 2)->nullable();
             $table->dateTime('AssignDate')->nullable();
             $table->dateTime('ScheduleDate')->nullable();
             $table->dateTime('ReceiveDate')->nullable();

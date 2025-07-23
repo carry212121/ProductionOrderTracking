@@ -21,6 +21,7 @@ Route::get('/dashboard/product-process', [ProductController::class, 'productProc
 Route::get('/proforma-invoice/{id}/products', [ProductController::class, 'list'])->name('products.list');
 Route::get('/proforma-invoice/{pi_id}/products/{product_id}', [ProductController::class, 'detail'])->name('products.detail');
 Route::post('/proforma-invoice/import', [ProformaInvoiceController::class, 'importExcel'])->name('proformaInvoice.importExcel');
+Route::post('/proformaInvoice/preview', [ProformaInvoiceController::class, 'preview'])->name('proformaInvoice.preview');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

@@ -103,13 +103,48 @@
 
                             <div class="flex flex-wrap gap-2 mb-3">
                                 @foreach ($processOrder as $eng => $thai)
+                                    @php
+                                        $jc = $jobControls[$eng] ?? null;
+                                        $lateDays = null;
+                                        $lateClass = '';
+
+                                        if ($jc?->ScheduleDate) {
+                                            $schedule = \Carbon\Carbon::parse($jc->ScheduleDate)->startOfDay();
+                                            $referenceDate = $jc->ReceiveDate
+                                                ? \Carbon\Carbon::parse($jc->ReceiveDate)->startOfDay()
+                                                : \Carbon\Carbon::today();
+
+                                            $lateDays = $referenceDate->gt($schedule) ? $schedule->diffInDays($referenceDate) : 0;
+
+                                            if ($lateDays > 15) {
+                                                $lateClass = 'bg-red-400 text-white border border-red-800';
+                                            } elseif ($lateDays > 7) {
+                                                $lateClass = 'bg-red-200 border border-red-500';
+                                            } elseif ($lateDays >= 1) {
+                                                $lateClass = 'bg-yellow-100 border border-yellow-400';
+                                            }
+                                        }
+
+                                        $isActive = $eng === $latestProcessKey;
+                                        $buttonClasses = 'process-btn text-sm px-3 py-1 rounded border transition';
+
+                                        if ($isActive) {
+                                            $buttonClasses .= ' bg-blue-500 text-white border-blue-700';
+                                        } else {
+                                            $buttonClasses .= ' ' . $lateClass;
+                                        }
+                                    @endphp
+
                                     <button type="button"
-                                        class="process-btn text-sm px-3 py-1 rounded border border-gray-300 hover:bg-blue-100"
+                                        class="{{ $buttonClasses }}"
                                         data-target="form-{{ $product->id }}-{{ $eng }}"
-                                        @if ($eng === $latestProcessKey) data-active="true" @endif>
+                                        data-late-class="{{ $lateClass }}"
+                                        @if ($isActive) data-active="true" @endif>
                                         {{ $thai }}
                                     </button>
                                 @endforeach
+
+
                             </div>
 
                             @foreach ($processOrder as $eng => $thai)
@@ -212,7 +247,7 @@
                                     </div>
 
                                     {{-- Third Row: TotalWeightBefore + TotalWeightAfter --}}
-                                    <div class="grid grid-cols-2 gap-2">
+                                    {{-- <div class="grid grid-cols-2 gap-2">
                                         <div>
                                             <label>น้ำหนักทั้งหมดก่อน:</label>
                                             <input type="number" name="TotalWeightBefore" value="{{ $jc->TotalWeightBefore ?? '' }}" class="border p-1 w-full">
@@ -221,7 +256,7 @@
                                             <label>น้ำหนักทั้งหมดหลัง:</label>
                                             <input type="number" name="TotalWeightAfter" value="{{ $jc->TotalWeightAfter ?? '' }}" class="border p-1 w-full">
                                         </div>
-                                    </div>
+                                    </div> --}}
 
                                     {{-- Fourth Row: AssignDate + ScheduleDate + ReceiveDate --}}
                                     <div class="grid grid-cols-3 gap-2">
@@ -287,13 +322,23 @@
     <script>
         document.querySelectorAll('.process-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const wrapper = btn.closest('div'); // button group
+                const wrapper = btn.closest('div'); // group of buttons
                 const allButtons = wrapper.querySelectorAll('.process-btn');
-                allButtons.forEach(b => b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500'));
 
+                allButtons.forEach(b => {
+                    b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500', 'border-blue-700');
+
+                    // Restore original lateness class
+                    const lateClass = b.dataset.lateClass || '';
+                    const lateClasses = lateClass.split(' ').filter(Boolean);
+                    lateClasses.forEach(cls => b.classList.add(cls));
+                });
+
+                // Apply selected (blue) highlight
+                btn.classList.remove('bg-red-400', 'bg-red-200', 'bg-yellow-100', 'text-white', 'border-red-800', 'border-red-500', 'border-yellow-400');
                 btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
 
-                const productBlock = btn.closest('.grid'); // scope to current product card
+                const productBlock = btn.closest('.grid');
                 const allForms = productBlock.querySelectorAll('form[id^="form-"]');
                 allForms.forEach(f => f.classList.add('hidden'));
 

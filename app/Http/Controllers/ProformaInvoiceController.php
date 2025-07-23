@@ -19,34 +19,46 @@ class ProformaInvoiceController extends Controller
     public function SummaryPIandProduct(Request $request)
     {
         $viewBy = $request->get('viewBy', 'pi'); // default is 'pi'
-        $selectedMonth = $request->get('month');
 
         $proformaInvoicesQuery = ProformaInvoice::with('products.jobControls');
 
-        if ($selectedMonth) {
-            $parsedMonth = Carbon::parse($selectedMonth);
-            $proformaInvoicesQuery->whereMonth('OrderDate', $parsedMonth->month)
-                                ->whereYear('OrderDate', $parsedMonth->year);
-            // Log::info("📅 Filtering for month: " . $parsedMonth->format('F Y'));
-        }
+        $startMonth = $request->get('start_month') ?? now()->year . '-01'; // Default: January
+        $endMonth = $request->get('end_month') ?? now()->year . '-12';     // Default: December
+
+        $startDate = Carbon::parse($startMonth . '-01')->startOfMonth();
+        $endDate = Carbon::parse($endMonth . '-01')->endOfMonth();
+
+        $proformaInvoicesQuery->whereBetween('OrderDate', [$startDate, $endDate]);
 
         $proformaInvoices = $proformaInvoicesQuery->get();
-        // Log::info("📦 Total PIs fetched: " . $proformaInvoices->count());
+
+        // ❌ Filter out PIs where all products are finished
+        $proformaInvoices = $proformaInvoices->filter(function ($pi) {
+            return $pi->products->where('Status', '!=', 'Finish')->isNotEmpty();
+        })->values(); // Reset index
+        $today = now()->startOfDay();
+        $processOrder = ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'];
+
+        // 🔁 Add logic: Count overdue PIs by ScheduleDate where product not Finish
+        foreach ($proformaInvoices as $pi) {
+            if ($pi->ScheduleDate && Carbon::parse($pi->ScheduleDate)->lt($today)) {
+                $pi->lateBySchedule = $pi->products->where('Status', '!=', 'Finish')->count();
+            } else {
+                $pi->lateBySchedule = 0;
+            }
+        }
 
         if ($viewBy === 'product') {
             $total = $proformaInvoices->flatMap->products->filter(fn($p) => $p->Status !== 'Finish')->count();
         } else {
             $total = $proformaInvoices->count();
         }
-        //Log::info("📊 Total to display: $total");
-        $today = \Carbon\Carbon::today();
-        $processOrder = ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'];
 
         $onTime = 0;
         $lateYellow = 0;
         $lateRed = 0;
         $lateDarkRed = 0;
-        
+
         foreach ($proformaInvoices as $pi) {
             $maxDaysLate = 0;
             $isLate = false;
@@ -55,8 +67,8 @@ class ProformaInvoiceController extends Controller
                 if ($product->Status === 'Finish') continue;
 
                 $jobControls = $product->jobControls->keyBy('Process');
-
                 $latestProcess = null;
+
                 foreach ($processOrder as $process) {
                     if (!empty($jobControls[$process]?->AssignDate)) {
                         $latestProcess = $process;
@@ -65,25 +77,23 @@ class ProformaInvoiceController extends Controller
 
                 if ($latestProcess && isset($jobControls[$latestProcess])) {
                     $job = $jobControls[$latestProcess];
-                    $scheduleDate = \Carbon\Carbon::parse($job->ScheduleDate);
+                    $scheduleDate = Carbon::parse($job->ScheduleDate)->startOfDay();
                     $receiveDate = $job->ReceiveDate;
-      
-                    // Log::info("🔍 PI #{$pi->id} | Product #{$product->id} | Process: $latestProcess | Schedule: $scheduleDate | Receive: " . ($receiveDate ?? 'null'));
 
                     if ($scheduleDate->lt($today) && $receiveDate === null) {
                         $isLate = true;
-                        $daysLate = $scheduleDate->diffInDays($today);
-                        $maxDaysLate = max($maxDaysLate, $daysLate); // Track latest overdue
-
-                        // Log::warning("⛔ LATE → PI #{$pi->id} | Product #{$product->id} | Days late: $daysLate");
+                        $daysLate = (int) floor($scheduleDate->diffInDays($today));
+                        $maxDaysLate = max($maxDaysLate, $daysLate);
                     }
                 }
             }
 
             if ($viewBy === 'product') {
                 foreach ($pi->products as $product) {
-                    if ($product->Status === 'Finish') continue;
-
+                    if ($product->Status === 'Finish') {
+                        Log::info("⏭️ Skipping finished product: {$product->ProductCode}");
+                        continue;
+                    }
                     $jobControls = $product->jobControls->keyBy('Process');
                     $latestProcess = null;
 
@@ -93,45 +103,62 @@ class ProformaInvoiceController extends Controller
                         }
                     }
 
+                    $isLate = false;
+                    $daysLate = 0;
+
+                    // Case 1: Late by process
                     if ($latestProcess && isset($jobControls[$latestProcess])) {
                         $job = $jobControls[$latestProcess];
-                        $scheduleDate = \Carbon\Carbon::parse($job->ScheduleDate);
+                        $scheduleDate = Carbon::parse($job->ScheduleDate)->startOfDay();
                         $receiveDate = $job->ReceiveDate;
 
                         if ($scheduleDate->lt($today) && $receiveDate === null) {
-                            $daysLate = $scheduleDate->diffInDays($today);
-
-                            if ($daysLate >= 15) $lateDarkRed++;
-                            elseif ($daysLate >= 8) $lateRed++;
-                            elseif ($daysLate >= 1) $lateYellow++;
-                        } else {
-                            $onTime++;
+                            $isLate = true;
+                            $daysLate = (int) floor($scheduleDate->diffInDays($today));
+                            Log::info("🔴 [Late by Process] PI {$pi->PINumber} | Product {$product->ProductNumber} | Days Late: $daysLate");
                         }
-                    } else {
-                        // No process assigned yet → assume on time
+                    }
+
+                    // Case 2: Late by PI schedule date
+                    if (!$isLate && $pi->ScheduleDate && Carbon::parse($pi->ScheduleDate)->lt($today)) {
+                        $isLate = true;
+                        $daysLate = Carbon::parse($pi->ScheduleDate)->copy()->startOfDay()->diffInDays($today);
+                        Log::info("🟠 [Late by PI Schedule] PI {$pi->PINumber} | Product {$product->ProductNumber} | Days Late: $daysLate");
+                    }
+
+                    // Count based on daysLate
+                    if ($isLate) {
+                        if ($daysLate >= 15) {
+                            $lateDarkRed++;
+                            Log::info("🔥 [Dark Red] Product {$product->ProductNumber}");
+                        } elseif ($daysLate >= 8) {
+                            $lateRed++;
+                            Log::info("🔴 [Red] Product {$product->ProductNumber}");
+                        } elseif ($daysLate >= 1) {
+                            $lateYellow++;
+                            Log::info("🟡 [Yellow] Product {$product->ProductNumber}");
+                        }
+                    } elseif (!$isLate) {
                         $onTime++;
+                        Log::info("✅ [On Time] Product {$product->ProductNumber}");
+                    }else{
+                        Log::warning("❓ Uncounted Product: {$product->ProductCode} | Status={$product->Status} | isLate=$isLate | Schedule={$pi->ScheduleDate}");
                     }
                 }
             } else {
-                if ($isLate) {
-                    if ($maxDaysLate >= 15) $lateDarkRed++;
-                    elseif ($maxDaysLate >= 8) $lateRed++;
-                    elseif ($maxDaysLate >= 1) $lateYellow++;
+                if ($isLate || $pi->lateBySchedule > 0) {
+                    if ($maxDaysLate >= 15 || $pi->lateBySchedule >= 15) $lateDarkRed++;
+                    elseif ($maxDaysLate >= 8 || $pi->lateBySchedule >= 8) $lateRed++;
+                    elseif ($maxDaysLate >= 1 || $pi->lateBySchedule >= 1) $lateYellow++;
                 } else {
                     $onTime++;
                 }
             }
-
         }
-        // Log::info("✅ countItems: $countItems");
+        Log::info("🔢 Total Products Checked (non-finished): " . $proformaInvoices->flatMap->products->filter(fn($p) => $p->Status !== 'Finish')->count());
         $late = $lateYellow + $lateRed + $lateDarkRed;
-        //Log::info("📊 Totals: $total | ✅ On-time: $onTime | ⛔ Lates: $lateYellow (1-7 days), $lateRed (8-14 days), $lateDarkRed (15+ days)");
-        // Log::info("✅ On-time PIs: $onTime");
-        // Log::info("⛔ Lates: {$lateYellow} (1-7 days), {$lateRed} (8-14 days), {$lateDarkRed} (15+ days)");
-
+        Log::info("📊 Summary: Totals: $total | On Time: $onTime | Late Yellow: $lateYellow | Late Red: $lateRed | Late Dark Red: $lateDarkRed");
         $groupBy = $request->get('groupBy', 'factory');
-        // Log::info("📊 Grouping by: $groupBy");
-
         $grouped = $groupBy === 'production'
             ? User::where('role', 'Production')->pluck('name', 'id')
             : Factory::pluck('FactoryName', 'id');
@@ -146,7 +173,6 @@ class ProformaInvoiceController extends Controller
             $users = User::where('role', 'Production')->get();
             foreach ($users as $user) {
                 $label = $user->name;
-
                 $pisForUser = $proformaInvoices->filter(fn($pi) => $pi->user_id === $user->id);
 
                 $onTimeCount = 0;
@@ -154,41 +180,84 @@ class ProformaInvoiceController extends Controller
                 $red = 0;
                 $darkRed = 0;
 
-                foreach ($pisForUser as $pi) {
-                    $maxDaysLate = 0;
-                    $isLate = false;
+                if ($viewBy === 'product') {
+                    foreach ($pisForUser as $pi) {
+                        foreach ($pi->products as $product) {
+                            if ($product->Status === 'Finish') continue;
 
-                    foreach ($pi->products as $product) {
-                        if ($product->Status === 'Finish') continue;
-
-                        $jobControls = $product->jobControls->keyBy('Process');
-                        $latestProcess = null;
-
-                        foreach ($processOrder as $process) {
-                            if (!empty($jobControls[$process]?->AssignDate)) {
-                                $latestProcess = $process;
+                            $jobControls = $product->jobControls->keyBy('Process');
+                            $latestProcess = null;
+                            foreach ($processOrder as $process) {
+                                if (!empty($jobControls[$process]?->AssignDate)) {
+                                    $latestProcess = $process;
+                                }
                             }
-                        }
 
-                        if ($latestProcess && isset($jobControls[$latestProcess])) {
-                            $job = $jobControls[$latestProcess];
-                            $scheduleDate = \Carbon\Carbon::parse($job->ScheduleDate);
-                            $receiveDate = $job->ReceiveDate;
+                            $isLate = false;
+                            $daysLate = 0;
 
-                            if ($scheduleDate->lt($today) && $receiveDate === null) {
+                            if ($latestProcess && isset($jobControls[$latestProcess])) {
+                                $job = $jobControls[$latestProcess];
+                                $scheduleDate = Carbon::parse($job->ScheduleDate)->startOfDay();
+                                $receiveDate = $job->ReceiveDate;
+
+                                if ($scheduleDate->lt($today) && $receiveDate === null) {
+                                    $isLate = true;
+                                    $daysLate = (int) floor($scheduleDate->diffInDays($today));
+                                }
+                            }
+
+                            if (!$isLate && $pi->ScheduleDate && Carbon::parse($pi->ScheduleDate)->lt($today)) {
                                 $isLate = true;
-                                $daysLate = $scheduleDate->diffInDays($today);
-                                $maxDaysLate = max($maxDaysLate, $daysLate);
+                                $daysLate = (int) Carbon::parse($pi->ScheduleDate)->diffInDays($today);
+                            }
+
+                            if ($isLate) {
+                                if ($daysLate >= 15) $darkRed++;
+                                elseif ($daysLate >= 8) $red++;
+                                elseif ($daysLate >= 1) $yellow++;
+                            } else {
+                                $onTimeCount++;
                             }
                         }
                     }
+                } else {
+                    foreach ($pisForUser as $pi) {
+                        $maxDaysLate = 0;
+                        $isLate = false;
 
-                    if ($isLate) {
-                        if ($maxDaysLate >= 15) $darkRed++;
-                        elseif ($maxDaysLate >= 8) $red++;
-                        elseif ($maxDaysLate >= 1) $yellow++;
-                    } else {
-                        $onTimeCount++;
+                        foreach ($pi->products as $product) {
+                            if ($product->Status === 'Finish') continue;
+
+                            $jobControls = $product->jobControls->keyBy('Process');
+                            $latestProcess = null;
+
+                            foreach ($processOrder as $process) {
+                                if (!empty($jobControls[$process]?->AssignDate)) {
+                                    $latestProcess = $process;
+                                }
+                            }
+
+                            if ($latestProcess && isset($jobControls[$latestProcess])) {
+                                $job = $jobControls[$latestProcess];
+                                $scheduleDate = Carbon::parse($job->ScheduleDate)->startOfDay();
+                                $receiveDate = $job->ReceiveDate;
+
+                                if ($scheduleDate->lt($today) && $receiveDate === null) {
+                                    $isLate = true;
+                                    $daysLate = (int) floor($scheduleDate->diffInDays($today));
+                                    $maxDaysLate = max($maxDaysLate, $daysLate);
+                                }
+                            }
+                        }
+
+                        if ($isLate || $pi->lateBySchedule > 0) {
+                            if ($maxDaysLate >= 15 || $pi->lateBySchedule >= 15) $darkRed++;
+                            elseif ($maxDaysLate >= 8 || $pi->lateBySchedule >= 8) $red++;
+                            elseif ($maxDaysLate >= 1 || $pi->lateBySchedule >= 1) $yellow++;
+                        } else {
+                            $onTimeCount++;
+                        }
                     }
                 }
 
@@ -197,8 +266,6 @@ class ProformaInvoiceController extends Controller
                 $barChartLateYellow[] = $yellow;
                 $barChartLateRed[] = $red;
                 $barChartLateDarkRed[] = $darkRed;
-
-                // Log::info("👤 $label → ✅ On-time: $onTimeCount | 🟡 Yellow: $yellow | 🔴 Red: $red | 🔥 DarkRed: $darkRed");
             }
         } else {
             $factories = Factory::all();
@@ -219,41 +286,88 @@ class ProformaInvoiceController extends Controller
                 $red = 0;
                 $darkRed = 0;
 
-                foreach ($pisForFactory as $pi) {
-                    $maxDaysLate = 0;
-                    $isLate = false;
+                if ($viewBy === 'product') {
+                    foreach ($pisForFactory as $pi) {
+                        foreach ($pi->products as $product) {
+                            if ($product->Status === 'Finish') continue;
 
-                    foreach ($pi->products as $product) {
-                        if ($product->Status === 'Finish') continue;
+                            $hasFactory = $product->jobControls->contains(fn($jc) => $jc->factory_id == $factory->id);
+                            if (! $hasFactory) continue;
 
-                        $jobControls = $product->jobControls->keyBy('Process');
-                        $latestProcess = null;
-
-                        foreach ($processOrder as $process) {
-                            if (!empty($jobControls[$process]?->AssignDate)) {
-                                $latestProcess = $process;
+                            $jobControls = $product->jobControls->keyBy('Process');
+                            $latestProcess = null;
+                            foreach ($processOrder as $process) {
+                                if (!empty($jobControls[$process]?->AssignDate)) {
+                                    $latestProcess = $process;
+                                }
                             }
-                        }
 
-                        if ($latestProcess && isset($jobControls[$latestProcess])) {
-                            $job = $jobControls[$latestProcess];
-                            $scheduleDate = \Carbon\Carbon::parse($job->ScheduleDate);
-                            $receiveDate = $job->ReceiveDate;
+                            $isLate = false;
+                            $daysLate = 0;
 
-                            if ($scheduleDate->lt($today) && $receiveDate === null) {
+                            if ($latestProcess && isset($jobControls[$latestProcess])) {
+                                $job = $jobControls[$latestProcess];
+                                $scheduleDate = Carbon::parse($job->ScheduleDate)->startOfDay();
+                                $receiveDate = $job->ReceiveDate;
+
+                                if ($scheduleDate->lt($today) && $receiveDate === null) {
+                                    $isLate = true;
+                                    $daysLate = (int) floor($scheduleDate->diffInDays($today));
+                                }
+                            }
+
+                            if (!$isLate && $pi->ScheduleDate && Carbon::parse($pi->ScheduleDate)->lt($today)) {
                                 $isLate = true;
-                                $daysLate = $scheduleDate->diffInDays($today);
-                                $maxDaysLate = max($maxDaysLate, $daysLate);
+                                $daysLate = (int) Carbon::parse($pi->ScheduleDate)->diffInDays($today);
+                            }
+
+                            if ($isLate) {
+                                if ($daysLate >= 15) $darkRed++;
+                                elseif ($daysLate >= 8) $red++;
+                                elseif ($daysLate >= 1) $yellow++;
+                            } else {
+                                $onTimeCount++;
                             }
                         }
                     }
 
-                    if ($isLate) {
-                        if ($maxDaysLate >= 15) $darkRed++;
-                        elseif ($maxDaysLate >= 8) $red++;
-                        elseif ($maxDaysLate >= 1) $yellow++;
-                    } else {
-                        $onTimeCount++;
+                } else {
+                    foreach ($pisForFactory as $pi) {
+                        $maxDaysLate = 0;
+                        $isLate = false;
+
+                        foreach ($pi->products as $product) {
+                            if ($product->Status === 'Finish') continue;
+
+                            $jobControls = $product->jobControls->keyBy('Process');
+                            $latestProcess = null;
+
+                            foreach ($processOrder as $process) {
+                                if (!empty($jobControls[$process]?->AssignDate)) {
+                                    $latestProcess = $process;
+                                }
+                            }
+
+                            if ($latestProcess && isset($jobControls[$latestProcess])) {
+                                $job = $jobControls[$latestProcess];
+                                $scheduleDate = Carbon::parse($job->ScheduleDate)->startOfDay();
+                                $receiveDate = $job->ReceiveDate;
+
+                                if ($scheduleDate->lt($today) && $receiveDate === null) {
+                                    $isLate = true;
+                                    $daysLate = (int) floor($scheduleDate->diffInDays($today));
+                                    $maxDaysLate = max($maxDaysLate, $daysLate);
+                                }
+                            }
+                        }
+
+                        if ($isLate || $pi->lateBySchedule > 0) {
+                            if ($maxDaysLate >= 15 || $pi->lateBySchedule >= 15) $darkRed++;
+                            elseif ($maxDaysLate >= 8 || $pi->lateBySchedule >= 8) $red++;
+                            elseif ($maxDaysLate >= 1 || $pi->lateBySchedule >= 1) $yellow++;
+                        } else {
+                            $onTimeCount++;
+                        }
                     }
                 }
 
@@ -262,15 +376,12 @@ class ProformaInvoiceController extends Controller
                 $barChartLateYellow[] = $yellow;
                 $barChartLateRed[] = $red;
                 $barChartLateDarkRed[] = $darkRed;
-
-                // Log::info("🏭 $label → ✅ On-time: $onTimeCount | 🟡 Yellow: $yellow | 🔴 Red: $red | 🔥 DarkRed: $darkRed");
             }
         }
 
-        // Log::info("📊 Final bar chart labels: " . implode(', ', $barChartLabels));
+
         $page = $request->get('barPage', 1);
         $perPage = 10;
-
         $totalEntities = count($barChartLabels);
         $start = ($page - 1) * $perPage;
 
@@ -279,20 +390,18 @@ class ProformaInvoiceController extends Controller
         $barChartLateYellow = array_slice($barChartLateYellow, $start, $perPage);
         $barChartLateRed = array_slice($barChartLateRed, $start, $perPage);
         $barChartLateDarkRed = array_slice($barChartLateDarkRed, $start, $perPage);
-
         $totalPages = ceil($totalEntities / $perPage);
-
 
         return view('dashboard.index', compact(
             'total', 'onTime', 'late',
             'lateYellow', 'lateRed', 'lateDarkRed',
-            'selectedMonth', 'groupBy', 'grouped',
+            'startMonth', 'endMonth', 'groupBy', 'grouped',
             'barChartLabels', 'barChartOnTime',
             'barChartLateYellow', 'barChartLateRed', 'barChartLateDarkRed',
             'page', 'totalPages', 'viewBy'
         ));
-
     }
+
 
     public function index(Request $request)
     {
@@ -364,11 +473,12 @@ class ProformaInvoiceController extends Controller
                 'CustomerID'           => trim($firstRow['D']),
                 'CustomerPO'           => trim($firstRow['I']),
                 'CustomerInstruction'  => trim($firstRow['M']),
-                'FOB'                  => floatval($firstRow['X']),
                 'FreightPrepaid'       => floatval($firstRow['N']),
                 'InsurancePrepaid'     => floatval($firstRow['O']),
                 'Deposit'              => floatval($firstRow['P']),
                 'OrderDate'            => $this->parseExcelDate($firstRow['F']),
+                'ScheduleDate'            => $this->parseExcelDate($firstRow['G']),
+                'CompletionDate'            => $this->parseExcelDate($firstRow['H']),
                 'SalesPerson'          => $salesUser?->id,
                 'user_id'              => $productionUser?->id,
             ]);
@@ -390,6 +500,7 @@ class ProformaInvoiceController extends Controller
             }
 
             Log::info("✅ Imported PI: {$pi->PInumber} with " . count($orderRows) . " products.");
+            Log::info("📅 Raw OrderDate: " . $firstRow['F']);
         }
 
 
@@ -404,13 +515,35 @@ class ProformaInvoiceController extends Controller
             if (is_numeric($excelDate)) {
                 return \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($excelDate);
             } else {
-                return Carbon::parse($excelDate);
+                // Example input: "4/18/2025 10:23 A4P4"
+                // Step 1: Split before noise (keep date + time only)
+                $cleaned = preg_split('/\s[A-Za-z0-9]*$/', trim($excelDate))[0];
+
+                // Step 2: Parse cleaned datetime
+                return Carbon::parse($cleaned);
             }
         } catch (\Exception $e) {
             Log::warning("⚠️ Date parse failed: " . $excelDate);
             return null;
         }
     }
+    public function preview(Request $request)
+    {
+        $request->validate([
+            'excel_file' => 'required|file|mimes:xlsx,xls',
+        ]);
 
+        try {
+            $file = $request->file('excel_file');
+            $data = \Maatwebsite\Excel\Facades\Excel::toArray([], $file);
+
+            return view('proformaInvoice.preview', [
+                'rows' => $data[0] ?? [],
+            ]);
+        } catch (\Exception $e) {
+            Log::error("📛 Excel Preview Error: " . $e->getMessage());
+            return redirect()->back()->with('excel_error', 'ไม่สามารถอ่านไฟล์ Excel ได้');
+        }
+    }
 
 }

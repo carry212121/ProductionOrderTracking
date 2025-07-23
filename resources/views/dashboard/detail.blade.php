@@ -73,13 +73,13 @@
                                 <p class="text-sm text-gray-500">สินค้าทั้งหมด</p>
                                 <p id="totalCount" class="text-2xl font-bold">{{ $products->count() }}</p>
                             </div>
-                            <div class="bg-green-100 rounded p-4 text-center">
-                                <p class="text-sm text-gray-500">ตรงเวลา</p>
-                                <p id="onTimeCount" class="text-2xl font-bold text-green-700">{{ $onTime }}</p>
-                            </div>
                             <div class="bg-red-100 rounded p-4 text-center">
                                 <p class="text-sm text-gray-500">เลท</p>
                                 <p id="lateCount" class="text-2xl font-bold text-red-700">{{ $lateYellow + $lateRed + $lateDarkRed }}</p>
+                            </div>
+                            <div class="bg-green-100 rounded p-4 text-center">
+                                <p class="text-sm text-gray-500">ตรงเวลา</p>
+                                <p id="onTimeCount" class="text-2xl font-bold text-green-700">{{ $onTime }}</p>
                             </div>
                         </div>
                     </div>
@@ -106,36 +106,12 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 xl:grid-cols-3 gap-4">
                             @foreach ($products as $product)
                                 @php
-                                    $today = Carbon\Carbon::today();
-                                    $processOrder = ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'];
-                                    $jobControls = $product->jobControls->keyBy('Process');
-                                    $latestProcess = null;
-                                    foreach ($processOrder as $process) {
-                                        if (!empty($jobControls[$process]?->AssignDate)) {
-                                            $latestProcess = $process;
-                                        }
-                                    }
-
-                                    $daysLate = 0;
-                                    $bgClass = 'bg-gray-50';
-
-                                    if ($latestProcess && isset($jobControls[$latestProcess])) {
-                                        $job = $jobControls[$latestProcess];
-                                        $scheduleDate = $job->ScheduleDate ? Carbon\Carbon::parse($job->ScheduleDate) : null;
-                                        $receiveDate = $job->ReceiveDate;
-
-                                        if ($scheduleDate && $scheduleDate->lt($today) && !$receiveDate) {
-                                            $daysLate = $scheduleDate->diffInDays($today);
-
-                                            if ($daysLate >= 15) {
-                                                $bgClass = 'bg-red-400';
-                                            } elseif ($daysLate >= 8) {
-                                                $bgClass = 'bg-red-200';
-                                            } elseif ($daysLate >= 1) {
-                                                $bgClass = 'bg-yellow-100';
-                                            }
-                                        }
-                                    }
+                                    $bgClass = match($product->late_status) {
+                                        'darkred' => 'bg-red-400',
+                                        'red' => 'bg-red-200',
+                                        'yellow' => 'bg-yellow-100',
+                                        default => 'bg-white',
+                                    };
                                 @endphp
 
                                 <div onclick="showProductModal(this)" class="border rounded-lg shadow p-4 {{ $bgClass }} hover:shadow-lg transition product-card "

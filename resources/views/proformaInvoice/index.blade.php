@@ -44,10 +44,19 @@
                             class="px-4 py-2 rounded bg-gray-300 hover:bg-gray-400 text-gray-800">
                         ยกเลิก
                     </button>
+                    <!-- 🆕 Preview button -->
+                    <button type="button" onclick="submitPreviewForm()"
+                            class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">
+                        🔍 ดูตัวอย่าง
+                    </button>
                     <button type="submit" class="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700">
                         อัปโหลด
                     </button>
                 </div>
+            </form>
+            <form id="previewForm" method="POST" action="{{ route('proformaInvoice.preview') }}" enctype="multipart/form-data" style="display: none;">
+                @csrf
+                <input type="file" name="excel_file" id="previewExcelFileInput">
             </form>
         </div>
     </div>
@@ -64,7 +73,7 @@
             <x-filter toggleId="filterToggleBtn" panelId="filterPanel">
                 <button class="filter-option w-full text-left hover:bg-gray-100 px-2 py-1" data-filter="all">📦 แสดงทั้งหมด</button>
                 {{-- <button class="filter-option w-full text-left hover:bg-green-100 px-2 py-1" data-filter="finished">✅ เสร็จแล้ว</button> --}}
-                <button class="filter-option w-full text-left hover:bg-red-100 px-2 py-1" data-filter="late">🔴 สินค้าเลท</button>
+                <button class="filter-option w-full text-left hover:bg-red-100 px-2 py-1" data-filter="late">🔴 PIเลท</button>
             </x-filter>
             <!-- Upload Excel Icon Button -->
             <button 
@@ -99,40 +108,39 @@
                         $totalCount = $pi->products->count();
                         $finishedCount = $pi->products->where('Status', 'Finish')->count();
 
-                        // Late count: if ScheduleDate is before today, count all products not yet finished
                         $lateCount = 0;
-                        if ($scheduledDate->lt($today)) {
-                            $lateCount = $pi->products->where('Status', '!=', 'Finish')->count();
-                        }
-
 
                         foreach ($pi->products as $product) {
-                            // ✅ Skip finished products
-                            if ($product->Status === 'Finish') {
-                                continue;
-                            }
+                            if ($product->Status === 'Finish') continue;
 
+                            $isLate = false;
                             $jobControls = $product->jobControls->keyBy('Process');
-
-                            // ✅ Find the latest assigned process
                             $latestProcess = null;
+
                             foreach ($processOrder as $process) {
                                 if (!empty($jobControls[$process]?->AssignDate)) {
                                     $latestProcess = $process;
                                 }
                             }
 
-                            // ✅ If ScheduleDate of current process is before today, count as late
                             if ($latestProcess && isset($jobControls[$latestProcess])) {
                                 $job = $jobControls[$latestProcess];
                                 $scheduleDate = \Carbon\Carbon::parse($job->ScheduleDate);
                                 $receiveDate = $job->ReceiveDate;
 
                                 if ($scheduleDate->lt($today) && $receiveDate === null) {
-                                    $lateCount++;
+                                    $isLate = true;
                                 }
                             }
+
+                            // fallback if no job control late
+                            if (!$isLate && $pi->ScheduleDate && $scheduledDate->lt($today)) {
+                                $isLate = true;
+                            }
+
+                            if ($isLate) $lateCount++;
                         }
+
                         $cardClass = 'bg-white border border-gray-200';
                         if ($lateCount > 0) {
                             $cardClass = 'bg-red-100 border border-red-400';
@@ -151,9 +159,16 @@
                             data-status="{{ $lateCount > 0 ? 'late' : ($finishedCount === $totalCount ? 'finished' : 'inprogress') }}"
                         >
                         <div class="{{ $cardClass }} rounded-lg shadow p-5">
-                            <h3 class="text-lg font-bold text-indigo-600 mb-2">
-                                รหัส PI: {{ $pi->PInumber }}
-                            </h3>
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="text-lg font-bold text-indigo-600">
+                                    รหัส PI: {{ $pi->PInumber }}
+                                </h3>
+                                @if($finishedCount === $totalCount && $totalCount > 0)
+                                    <span class="inline-block bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                                        ✅ Finish
+                                    </span>
+                                @endif
+                            </div>
                             {{-- Row 1: ชื่อลูกค้า + รหัส PO --}}
                             <div class="flex justify-between mb-2">
                                 <p class="w-1/2 pr-2 whitespace-nowrap overflow-hidden text-ellipsis">
@@ -240,6 +255,28 @@
             const file = event.target.files[0];
             fileNameDisplay.textContent = file ? file.name : '';
         });
+        function submitPreviewForm() {
+            const fileInput = document.getElementById('excelUploadInput');
+            const previewInput = document.getElementById('previewExcelFileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'กรุณาเลือกไฟล์ก่อนดูตัวอย่าง',
+                    confirmButtonText: 'ตกลง'
+                });
+                return;
+            }
+
+            // Clone file to hidden form
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            previewInput.files = dataTransfer.files;
+
+            document.getElementById('previewForm').submit();
+        }
+
     </script>
     @if(session('excel_success'))
     <script>
@@ -262,4 +299,5 @@
         });
     </script>
     @endif
+    
 </x-app-layout>
