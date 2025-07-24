@@ -6,7 +6,11 @@
             <span class="text-gray-800 font-medium">รายการสินค้าของ {{ $pi->PInumber }}</span>
         </nav>
     </x-slot>
-
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/customParseFormat.js"></script>
+    <script>
+        dayjs.extend(dayjs_plugin_customParseFormat);
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -98,7 +102,7 @@
                             <img src="{{ asset($img) }}" alt="Product Image" class="w-full h-70 object-contain border">
                         </div>
                         {{-- ✅ Column 3: กระบวนการ --}}
-                        <div class="{{ $highlightRed ? 'bg-red-100 border-red-400 border-2 rounded-lg p-2' : '' }}">
+                        <div class="">
                             <h3 class="font-bold text-indigo-600 mb-2">กระบวนการ</h3>
 
                             <div class="flex flex-wrap gap-2 mb-3">
@@ -168,7 +172,7 @@
 
                                         $lateDays = $referenceDate->gt($schedule) ? $schedule->diffInDays($referenceDate) : 0;
 
-                                        echo "<script>console.log('📦 Product ID: {$product->id} | Process: {$eng} | Schedule: {$schedule} | RefDate: {$referenceDate} | Late Days: {$lateDays}');</script>";
+                                        // echo "<script>console.log('📦 Product ID: {$product->id} | Process: {$eng} | Schedule: {$schedule} | RefDate: {$referenceDate} | Late Days: {$lateDays}');</script>";
 
                                         if ($lateDays > 15) {
                                             $lateClass = 'bg-red-400 border border-red-800';
@@ -182,8 +186,11 @@
                                     $formClasses = $isCasting ? '' : 'hidden';
                                     $formClasses .= $lateClass ? " $lateClass rounded-lg p-2" : '';
                                 @endphp
-                                <form method="POST" action="{{ route('jobcontrols.storeOrUpdate') }}" id="form-{{ $product->id }}-{{ $eng }}"
-                                    class="{{ $formClasses }} border-t pt-2 space-y-2 text-sm">
+                                <form method="POST" action="{{ route('jobcontrols.storeOrUpdate') }}"
+                                    class="{{ $formClasses }} border-t pt-2 space-y-2 text-sm ajax-jobcontrol-form"
+                                    data-product-id="{{ $product->id }}"
+                                    data-process="{{ $eng }}"
+                                    id="form-{{ $product->id }}-{{ $eng }}">
                                     @csrf
                                     <input type="hidden" name="product_id" value="{{ $product->id }}">
                                     <input type="hidden" name="process" value="{{ $eng }}">
@@ -450,6 +457,170 @@
             maxDate: "today",
             clearBtn: true
         });
+        const productIdToNumber = @json(\App\Models\Product::pluck('ProductNumber', 'id'));
+        const processNameMap = {
+            Casting: 'หล่อ',
+            Stamping: 'ปั้ม',
+            Trimming: 'แต่ง',
+            Polishing: 'ขัด',
+            Setting: 'ฝัง',
+            Plating: 'ชุบ'
+        };
+
+        document.querySelectorAll('.ajax-jobcontrol-form').forEach(form => {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const formData = new FormData(form);
+                const action = form.getAttribute('action');
+
+                const submitButton = form.querySelector('button[type="submit"]');
+                submitButton.disabled = true;
+                submitButton.textContent = 'กำลังบันทึก...';
+
+                try {
+                    const response = await fetch(action, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        },
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        const productId = formData.get('product_id');
+                        const productNumber = productIdToNumber[productId] || '-';
+                        const process = formData.get('process');
+                        const processThai = processNameMap[process] || process;
+                        const data = Object.fromEntries(formData.entries());
+
+                        console.log(`✅ Saved JobControl for Product ID ${productId} (${productNumber}) - Process: ${process} (${processThai})`);
+                        console.table(data); // tabular view of all form fields
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'บันทึกสำเร็จ',
+                            html: `
+                                <div class="text-left leading-relaxed">
+                                    <strong>รหัสสินค้า:</strong> ${productNumber}<br>
+                                    <strong>กระบวนการ:</strong> ${processThai}<br>
+                                    ข้อมูลของ JobControl ได้ถูกบันทึกแล้ว
+                                </div>
+                            `,
+                            confirmButtonColor: '#3085d6'
+                        });
+                        // ✅ Remove all active flags for this product
+                        document.querySelectorAll(`[data-product-id="${productId}"] .process-btn`).forEach(btn => {
+                            btn.dataset.active = "false";
+                        });
+
+                        // ✅ Mark the current saved process as active
+                        const currentButton = document.querySelector(`[data-target="form-${productId}-${process}"]`);
+                        if (currentButton) {
+                            currentButton.dataset.active = "true";
+                            console.log(`✅ Marked as active: Process ${process} for Product ${productId}`);
+                        } else {
+                            console.warn(`⚠️ Could not find button for process ${process} of Product ${productId}`);
+                        }
+                        updateLateStatus(productId, process);
+
+                    } else {
+                        const errorText = await response.text();
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'เกิดข้อผิดพลาด',
+                            html: `<pre style="text-align:left;">${errorText}</pre>`,
+                            width: 600
+                        });
+                        console.error(errorText);
+                    }
+                } catch (err) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์',
+                        text: err.message
+                    });
+                    console.error(err);
+                } finally {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'บันทึก';
+                }
+            });
+        });
+        function updateLateStatus(productId, processKey = null) {
+            const baseSelector = `[data-product-id="${productId}"]`;
+
+            const targetProcesses = processKey
+                ? [processKey]
+                : Array.from(document.querySelectorAll(`${baseSelector} .process-btn`))
+                        .map(btn => btn.dataset.target.split('-').pop());
+
+            targetProcesses.forEach(process => {
+                const button = document.querySelector(`#form-${productId}-${process}`)?.closest('.grid')?.querySelector(`[data-target="form-${productId}-${process}"]`);
+                const form = document.querySelector(`#form-${productId}-${process}`);
+                if (!form || !button) return;
+
+                const scheduleInput = form.querySelector('[name="ScheduleDate"]');
+                const receiveInput = form.querySelector('[name="ReceiveDate"]');
+
+                const schedule = scheduleInput?.value ? dayjs(scheduleInput.value, 'DD-MM-YYYY') : null;
+                const receive = receiveInput?.value ? dayjs(receiveInput.value, 'DD-MM-YYYY') : dayjs();
+
+                let lateDays = 0;
+                if (schedule && receive && receive.isAfter(schedule)) {
+                    lateDays = receive.diff(schedule, 'day');
+                }
+
+                // Reset classes
+                button.classList.remove(
+                    'bg-blue-500', 'text-white', 'border-blue-500',
+                    'bg-red-400', 'bg-red-200', 'bg-yellow-100',
+                    'border-red-800', 'border-red-500', 'border-yellow-400'
+                );
+                form.classList.remove(
+                    'bg-red-400', 'bg-red-200', 'bg-yellow-100',
+                    'border-red-800', 'border-red-500', 'border-yellow-400'
+                );
+
+                // Reapply blue for active process
+                const isActive = button.dataset.active === "true";
+                if (isActive) {
+                    button.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
+                    console.log(`🔵 BLUE BUTTON → Product ${productId} | Process ${process} marked as ACTIVE`);
+                } else {
+                    console.log(`⚪ Not active: Product ${productId} | Process ${process}`);
+                }
+
+                // Determine lateness style for form (but NOT button if active)
+                let colorLabel = '✅ On time';
+                let lateClass = '';
+
+                if (lateDays > 15) {
+                    if (!isActive) button.classList.add('bg-red-400', 'text-white', 'border-red-800');
+                    form.classList.add('bg-red-400', 'border-red-800');
+                    form.classList.add('rounded-lg', 'p-2');
+                    lateClass = 'bg-red-400 text-white border border-red-800';
+                    colorLabel = '🔴 Very Late';
+                } else if (lateDays > 7) {
+                    if (!isActive) button.classList.add('bg-red-200', 'border-red-500');
+                    form.classList.add('bg-red-200', 'border-red-500');
+                    form.classList.add('rounded-lg', 'p-2');
+                    lateClass = 'bg-red-200 border border-red-500';
+                    colorLabel = '🟥 Late';
+                } else if (lateDays >= 1) {
+                    if (!isActive) button.classList.add('bg-yellow-100', 'border-yellow-400');
+                    form.classList.add('bg-yellow-100', 'border-yellow-400');
+                    form.classList.add('rounded-lg', 'p-2');
+                    lateClass = 'bg-yellow-100 border border-yellow-400';
+                    colorLabel = '🟨 Slightly Late';
+                }
+
+                // Update attribute
+                button.setAttribute('data-late-class', lateClass);
+
+                console.log(`📦 Product ${productId} | Process ${process} | Late Days: ${lateDays} | Button Color: ${colorLabel}`);
+            });
+        }
+
 
     </script>
 </x-app-layout>
