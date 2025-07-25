@@ -409,8 +409,10 @@ class ProformaInvoiceController extends Controller
 
         $query = ProformaInvoice::with(['user', 'products', 'salesPerson']);
 
-        if ($user->role !== 'Admin') {
+        if ($user->role == 'Production') {
             $query->where('user_id', $user->id);
+        }elseif ($user->role == 'Sales') {
+            $query->where('SalesPerson', $user->id);
         }
 
         $pis = $query->latest()->get();

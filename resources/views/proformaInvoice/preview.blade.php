@@ -15,18 +15,18 @@
             @php $piRow = $rows[1] ?? []; @endphp
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-800">
-                <div><strong>รหัส PI:</strong> <span class="font-semibold">{{ $piRow[1] ?? '-' }}</span></div>
-                <div><strong>ชื่อลูกค้า:</strong> <span class="font-semibold">{{ $piRow[2] ?? '-' }}</span></div>
-                <div><strong>รหัสลูกค้า:</strong> <span class="font-semibold">{{ $piRow[3] ?? '-' }}</span></div>
-                <div><strong>พนักงานขาย:</strong> <span class="font-semibold">{{ $piRow[4] ?? '-' }}</span></div>
-                <div><strong>วันสั่ง (ว/ด/ป):</strong> <span class="font-semibold">{{ is_numeric($piRow[5]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[5])->format('d-m-Y') : $piRow[5] }}</span></div>
-                <div><strong>วันกำหนดรับ (ว/ด/ป):</strong> <span class="font-semibold">{{ is_numeric($piRow[6]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[6])->format('d-m-Y') : $piRow[6] }}</span></div>
-                <div><strong>วันรับ (ว/ด/ป):</strong> <span class="font-semibold">{{ is_numeric($piRow[7]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[7])->format('d-m-Y') : $piRow[7] }}</span></div>
-                <div><strong>รหัส PO:</strong> <span class="font-semibold">{{ $piRow[8] ?? '-' }}</span></div>
-                <div class="md:col-span-2"><strong>รายละเอียด PI:</strong> <span class="font-semibold">{{ $piRow[12] ?? '-' }}</span></div>
-                <div><strong>ค่าส่ง:</strong> <span class="font-semibold">{{ $piRow[13] ?? '-' }}</span></div>
-                <div><strong>ค่าประกัน:</strong> <span class="font-semibold">{{ $piRow[14] ?? '-' }}</span></div>
-                <div><strong>เงินฝาก:</strong> <span class="font-semibold">{{ $piRow[15] ?? '-' }}</span></div>
+                <div><strong>รหัส PI:</strong> <span>{{ $piRow[1] ?? '-' }}</span></div>
+                <div><strong>ชื่อลูกค้า:</strong> <span>{{ $piRow[2] ?? '-' }}</span></div>
+                <div><strong>รหัสลูกค้า:</strong> <span>{{ $piRow[3] ?? '-' }}</span></div>
+                <div><strong>พนักงานขาย:</strong> <span>{{ $piRow[4] ?? '-' }}</span></div>
+                <div><strong>วันสั่ง (ว/ด/ป):</strong> <span>{{ is_numeric($piRow[5]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[5])->format('d-m-Y') : $piRow[5] }}</span></div>
+                <div><strong>วันกำหนดรับ (ว/ด/ป):</strong> <span>{{ is_numeric($piRow[6]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[6])->format('d-m-Y') : $piRow[6] }}</span></div>
+                <div><strong>วันรับ (ว/ด/ป):</strong> <span>{{ is_numeric($piRow[7]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[7])->format('d-m-Y') : $piRow[7] }}</span></div>
+                <div><strong>รหัส PO:</strong> <span>{{ $piRow[8] ?? '-' }}</span></div>
+                <div class="md:col-span-2"><strong>รายละเอียด PI:</strong> <span>{{ $piRow[12] ?? '-' }}</span></div>
+                <div><strong>ค่าส่ง:</strong> <span>{{ $piRow[13] ?? '-' }}</span></div>
+                <div><strong>ค่าประกัน:</strong> <span>{{ $piRow[14] ?? '-' }}</span></div>
+                <div><strong>เงินฝาก:</strong> <span>{{ $piRow[15] ?? '-' }}</span></div>
             </div>
         </div>
 
@@ -34,32 +34,35 @@
         <div class="space-y-2 border border-blue-300 rounded-md p-4 bg-blue-50">
             <h2 class="text-lg font-bold text-blue-700">📦 รายการสินค้า</h2>
             <div class="overflow-x-auto">
-                <table class="w-full border-collapse border border-gray-300 text-sm bg-white rounded-md overflow-hidden">
-                    <thead class="bg-gray-100 text-gray-700">
-                        <tr>
-                            <th class="border px-4 py-2 text-left">รหัสสินค้า</th>
-                            <th class="border px-4 py-2 text-left">รายละเอียดสินค้า</th>
-                            <th class="border px-4 py-2 text-left">รหัสสินค้าลูกค้า</th>
-                            <th class="border px-4 py-2 text-left">น้ำหนัก</th>
-                            <th class="border px-4 py-2 text-left">จำนวน</th>
-                            <th class="border px-4 py-2 text-left">หน่วยต่อราคา</th>
-                        </tr>
-                    </thead>
-                    <tbody class="text-gray-800">
-                        @foreach(array_slice($rows, 1) as $row)
-                            <tr class="hover:bg-gray-50">
-                                <td class="border px-4 py-2">{{ $row[16] ?? '-' }}</td>
-                                <td class="border px-4 py-2">{{ $row[17] ?? '-' }}</td>
-                                <td class="border px-4 py-2">{{ $row[18] ?? '-' }}</td>
-                                <td class="border px-4 py-2">{{ $row[19] ?? '-' }}</td>
-                                <td class="border px-4 py-2">{{ ($row[20] ?? '-') . ' ' . ($row[21] ?? '') }}</td>
-                                <td class="border px-4 py-2">{{ $row[22] ?? '-' }}</td>
+                <div class="max-h-[240px] overflow-y-auto border border-gray-300 rounded-md">
+                    <table class="w-full border-collapse text-sm bg-white">
+                        <thead class="bg-gray-100 text-gray-700">
+                            <tr>
+                                <th class="border px-4 py-2 text-left">รหัสสินค้า</th>
+                                <th class="border px-4 py-2 text-left">รายละเอียดสินค้า</th>
+                                <th class="border px-4 py-2 text-left">รหัสสินค้าลูกค้า</th>
+                                <th class="border px-4 py-2 text-left">น้ำหนัก</th>
+                                <th class="border px-4 py-2 text-left">จำนวน</th>
+                                <th class="border px-4 py-2 text-left">หน่วยต่อราคา</th>
+                                <th class="border px-4 py-2 text-left">จำนวนเงินทั้งหมด</th>
                             </tr>
-                        @endforeach
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody class="text-gray-800">
+                            @foreach(array_slice($rows, 1) as $row)
+                                <tr class="hover:bg-gray-50">
+                                    <td class="border px-4 py-2">{{ $row[16] ?? '-' }}</td>
+                                    <td class="border px-4 py-2">{{ $row[17] ?? '-' }}</td>
+                                    <td class="border px-4 py-2">{{ $row[18] ?? '-' }}</td>
+                                    <td class="border px-4 py-2">{{ $row[19] ?? '-' }}</td>
+                                    <td class="border px-4 py-2">{{ ($row[20] ?? '-') . ' ' . ($row[21] ?? '') }}</td>
+                                    <td class="border px-4 py-2">{{ $row[22] ?? '-' }}</td>
+                                    <td class="border px-4 py-2">{{ $row[22] * $row[20] ?? '-' }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-
     </div>
 </x-app-layout>

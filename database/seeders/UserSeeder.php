@@ -36,7 +36,7 @@ class UserSeeder extends Seeder
         // 🔰 Admin User
         User::create([
             'username' => 'Chutapa',
-            'name' => 'Chutapa BN',
+            'name' => 'Chutapa KT',
             'password' => Hash::make('admin123'),
             'productionID' => 'KT',
             'salesID' => 'KT',

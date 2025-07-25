@@ -7,60 +7,61 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <!-- Excel Upload Modal -->
     <div id="excelUploadModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
-        <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md relative">
-            <!-- Close button -->
-            <button onclick="document.getElementById('excelUploadModal').classList.add('hidden')"
-                    class="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-xl">&times;</button>
-
+        <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-3xl min-h-[400px] flex flex-col justify-between relative">
+            
             <!-- Title -->
-            <h3 class="text-xl font-semibold mb-4 text-center">อัปโหลดไฟล์</h3>
+            <h3 class="text-xl font-semibold mb-4 text-center pb-2">อัปโหลดไฟล์</h3>
 
-            <!-- Body -->
-            <form method="POST" action="{{ route('proformaInvoice.importExcel') }}" enctype="multipart/form-data" class="flex flex-col items-center">
-                @csrf
+            <!-- Body with full box line -->
+            <div class="flex-grow px-4">
+                <div class="border border-gray-300 rounded p-6 flex flex-col items-center">
+                    <!-- Excel icon -->
+                    <div class="text-6xl text-green-600 mb-2">
+                        📄
+                    </div>
 
-                <!-- Excel icon -->
-                <div class="text-6xl text-green-600 mb-2">
-                    📄
+                    <!-- File name display -->
+                    <div id="selectedFileName" class="text-sm text-gray-700 mb-2 h-5 text-center truncate w-full">
+                        ยังไม่ได้เลือกไฟล์
+                    </div>
+
+                    <!-- Upload area -->
+                    <div class="drop-area text-center text-gray-600 text-sm border-dashed border-2 border-gray-300 rounded w-full py-6 cursor-pointer transition">
+                        ลากและวางไฟล์ที่นี่ หรือ 
+                        <label for="excelUploadInput" class="text-blue-600 underline cursor-pointer">
+                            เลือกไฟล์
+                        </label>
+                        <input id="excelUploadInput" type="file" name="excel_file" accept=".xlsx,.xls" required class="hidden">
+                    </div>
                 </div>
+            </div>
 
-                <!-- File name display -->
-                <div id="selectedFileName" class="text-sm text-gray-700 mb-2 h-5 text-center truncate w-full">
-                    ยังไม่ได้เลือกไฟล์
-                </div>
+            <!-- Bottom Buttons -->
+            <div class="flex justify-between w-full mt-4 text-sm text-blue-600 underline px-4">
+                <button type="button"
+                        onclick="closeUploadModal()"
+                        class="hover:text-blue-800">
+                    ❌ ยกเลิก
+                </button>
+                <button type="button"
+                        onclick="submitPreviewForm()"
+                        class="hover:text-blue-800">
+                    🔍 ดูตัวอย่าง
+                </button>
+                <button type="submit"
+                        form="excelUploadForm"
+                        class="hover:text-blue-800">
+                    ⬆️ อัปโหลด
+                </button>
+            </div>
 
-                <!-- Upload area -->
-                <div class="text-center text-gray-600 mb-6 text-sm">
-                    ลากและวางไฟล์ที่นี่ หรือ 
-                    <label for="excelUploadInput" class="text-blue-600 underline cursor-pointer">
-                        เลือกไฟล์
-                    </label>
-                    <input id="excelUploadInput" type="file" name="excel_file" accept=".xlsx,.xls" required class="hidden">
-                </div>
-
-                <!-- Buttons -->
-                <div class="flex justify-between w-full mt-4">
-                    <button type="button" onclick="document.getElementById('excelUploadModal').classList.add('hidden')"
-                            class="px-4 py-2 rounded bg-gray-300 hover:bg-gray-400 text-gray-800">
-                        ยกเลิก
-                    </button>
-                    <!-- 🆕 Preview button -->
-                    <button type="button" onclick="submitPreviewForm()"
-                            class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">
-                        🔍 ดูตัวอย่าง
-                    </button>
-                    <button type="submit" class="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700">
-                        อัปโหลด
-                    </button>
-                </div>
-            </form>
+            <!-- Hidden Preview Form -->
             <form id="previewForm" method="POST" action="{{ route('proformaInvoice.preview') }}" enctype="multipart/form-data" style="display: none;">
                 @csrf
                 <input type="file" name="excel_file" id="previewExcelFileInput">
             </form>
         </div>
     </div>
-
 
     
     <div class="flex justify-between items-center px-6 mt-4 gap-4 flex-wrap">
@@ -250,11 +251,65 @@
 
             updateNoResultsMessage(); // Call once initially
         });
+        const dropArea = document.querySelector('.drop-area');
+        const fileInput = document.getElementById('excelUploadInput');
+        const fileNameDisplay = document.getElementById('selectedFileName');
+
+        // Prevent default behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, e => e.preventDefault());
+            dropArea.addEventListener(eventName, e => e.stopPropagation());
+        });
+
+        // Highlight drop area
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => {
+                dropArea.classList.add('bg-blue-50', 'border-blue-400');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => {
+                dropArea.classList.remove('bg-blue-50', 'border-blue-400');
+            });
+        });
+
+        // Handle dropped files
+        dropArea.addEventListener('drop', e => {
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.match(/\.(xls|xlsx)$/)) {
+                fileInput.files = e.dataTransfer.files;
+                fileNameDisplay.textContent = file.name;
+            } else {
+                alert("กรุณาเลือกไฟล์ Excel เท่านั้น (.xls, .xlsx)");
+            }
+        });
+
+        // Handle normal file input
+        fileInput.addEventListener('change', function (event) {
+            const file = event.target.files[0];
+            fileNameDisplay.textContent = file ? file.name : '';
+        });
         document.getElementById('excelUploadInput').addEventListener('change', function (event) {
             const fileNameDisplay = document.getElementById('selectedFileName');
             const file = event.target.files[0];
             fileNameDisplay.textContent = file ? file.name : '';
         });
+        function closeUploadModal() {
+            // Hide modal
+            document.getElementById('excelUploadModal').classList.add('hidden');
+
+            // Reset file input
+            const fileInput = document.getElementById('excelUploadInput');
+            fileInput.value = '';
+
+            // Clear displayed filename
+            document.getElementById('selectedFileName').textContent = 'ยังไม่ได้เลือกไฟล์';
+
+            // Optional: Reset preview input too
+            const previewInput = document.getElementById('previewExcelFileInput');
+            if (previewInput) previewInput.value = '';
+        }
         function submitPreviewForm() {
             const fileInput = document.getElementById('excelUploadInput');
             const previewInput = document.getElementById('previewExcelFileInput');

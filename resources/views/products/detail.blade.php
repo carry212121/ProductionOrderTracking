@@ -8,268 +8,320 @@
             <span class="text-gray-800 font-medium">รายละเอียดสินค้า: {{ $product->ProductNumber }}</span>
         </nav>
     </x-slot>
-
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/customParseFormat.js"></script>
+    <script>
+        dayjs.extend(dayjs_plugin_customParseFormat);
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
     <div class="px-6 py-4 space-y-6">
         {{-- @foreach($pi->products as $index => $product) --}}
-                @php
-                    $processOrder = ['Casting' => 'หล่อ', 'Stamping' => 'ปั้ม', 'Trimming' => 'แต่ง', 'Polishing' => 'ขัด', 'Setting' => 'ฝัง', 'Plating' => 'ชุบ'];
-                    $jobControls = $product->jobControls->keyBy('Process');
-                    $hasAnyValue = $jobControls->filter(function ($jc) {
-                        return $jc->Billnumber || $jc->factory_id || $jc->QtyOrder || $jc->QtyReceive || $jc->TotalWeightBefore || $jc->TotalWeightAfter || $jc->AssignDate || $jc->ScheduleDate || $jc->ReceiveDate;
-                    })->isNotEmpty();
+            @php
+                $processOrder = ['Casting' => 'หล่อ', 'Stamping' => 'ปั้ม', 'Trimming' => 'แต่ง', 'Polishing' => 'ขัด', 'Setting' => 'ฝัง', 'Plating' => 'ชุบ'];
+                $jobControls = $product->jobControls->keyBy('Process');
+                $hasAnyValue = $jobControls->filter(function ($jc) {
+                    return $jc->Billnumber || $jc->factory_id || $jc->QtyOrder || $jc->QtyReceive || $jc->TotalWeightBefore || $jc->TotalWeightAfter || $jc->AssignDate || $jc->ScheduleDate || $jc->ReceiveDate;
+                })->isNotEmpty();
 
-                    $isFinished = $product->Status === 'Finish'; // Assuming you have a `Status` column in product
-                    $status = $isFinished ? 'Finish' : ($hasAnyValue ? 'InProgress' : 'Pending');
-                        // Get the latest process
-                    $latestProcessKey = null;
-                    foreach ($processOrder as $eng => $thai) {
-                        if (!empty($jobControls[$eng]?->AssignDate)) {
-                            $latestProcessKey = $eng;
-                        }
+                $isFinished = $product->Status === 'Finish'; // Assuming you have a `Status` column in product
+                $status = $isFinished ? 'Finish' : ($hasAnyValue ? 'InProgress' : 'Pending');
+                    // Get the latest process
+                $latestProcessKey = null;
+                foreach ($processOrder as $eng => $thai) {
+                    if (!empty($jobControls[$eng]?->AssignDate)) {
+                        $latestProcessKey = $eng;
                     }
-                    $highlightRed = false;
-                @endphp
-                <div class="relative bg-white p-6 rounded-lg shadow border product-card"
-                    data-product-number="{{ $product->ProductNumber }}"
-                    data-customer-number="{{ $product->ProductCustomerNumber }}"
-                    data-created-at="{{ $product->created_at }}">
-                    {{-- Toggle Status Checkbox at top-right --}}
-                    {{-- {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }} --}}
-                    <form method="POST" action="{{ route('products.toggleStatus', $product->id) }}" class="absolute top-2 right-3"> 
-                        @csrf
-                        @method('PUT')
-                        <input type="hidden" name="status" value="{{ $isFinished ? 'InProgress' : 'Finish' }}">
-                        <label class="inline-flex items-center text-sm font-medium text-gray-700 gap-1">
-                            {{ $status === 'Finish' ? '✅ เสร็จแล้ว' : ($status === 'InProgress' ? '🔄 ดำเนินการ' : '🕓 รอดำเนินการ') }}
-                            <input type="checkbox"
-                                class="ml-1"
-                                {{ $isFinished ? 'checked' : '' }}
-                                onchange="confirmToggleStatus(this)"
-                            >
-                        </label>
-                    </form>
+                }
+                $highlightRed = false;
+            @endphp
+            <div class="relative bg-white p-6 rounded-lg shadow border product-card"
+                data-product-number="{{ $product->ProductNumber }}"
+                data-customer-number="{{ $product->ProductCustomerNumber }}"
+                data-created-at="{{ $product->created_at }}">
+                {{-- Toggle Status Checkbox at top-right --}}
+                {{-- {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }} --}}
+                <form method="POST" action="{{ route('products.toggleStatus', $product->id) }}" class="absolute top-2 right-3"> 
+                    @csrf
+                    @method('PUT')
+                    <input type="hidden" name="status" value="{{ $isFinished ? 'InProgress' : 'Finish' }}">
+                    <label class="inline-flex items-center text-sm font-medium text-gray-700 gap-1">
+                        {{ $status === 'Finish' ? '✅ เสร็จแล้ว' : ($status === 'InProgress' ? '🔄 ดำเนินการ' : '🕓 รอดำเนินการ') }}
+                        <input type="checkbox"
+                            class="ml-1"
+                            {{ $isFinished ? 'checked' : '' }}
+                            onchange="confirmToggleStatus(this)"
+                        >
+                    </label>
+                </form>
 
-                    <div class="grid grid-cols-1 md:grid-cols-[15%_20%_45%_20%] gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-[15%_20%_45%_20%] gap-4">
 
-                        {{-- ✅ Column 1: รายละเอียดสินค้า --}}
-                        <div>
-                            <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดสินค้า</h3>
-                            {{-- <p>ลำดับที่: {{ $index + 1 }}</p> --}}
-                            <p>รหัสสินค้า: {{ $product->ProductNumber }}</p>
-                            <p>รหัสสินค้าลูกค้า: {{ $product->ProductCustomerNumber }}</p>
-                            <p>จำนวน: {{ $product->Quantity }}</p>
-                            <p>น้ำหนัก: {{ $product->Weight }}</p>
-                        </div>
+                    {{-- ✅ Column 1: รายละเอียดสินค้า --}}
+                    <div>
+                        <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดสินค้า</h3>
+                        {{-- <p>ลำดับที่: {{ $index + 1 }}</p> --}}
+                        <p>รหัสสินค้า: {{ $product->ProductNumber }}</p>
+                        <p>รหัสสินค้าลูกค้า: {{ $product->ProductCustomerNumber }}</p>
+                        <p>จำนวน: {{ $product->Quantity }}</p>
+                        <p>น้ำหนัก: {{ $product->Weight }}</p>
+                    </div>
 
-                        {{-- ✅ Column 2: รูปภาพสินค้า --}}
-                        <div>
-                            <h3 class="font-bold text-indigo-600 mb-2">รูปภาพสินค้า</h3>
-                            @php
-                                $img = $product->Image ?? 'images/default-product.jpg';
-                            @endphp
-                            <img src="{{ asset($img) }}" alt="Product Image" class="w-full h-70 object-contain border">
-                        </div>
-                        {{-- ✅ Column 3: กระบวนการ --}}
-                        <div class="{{ $highlightRed ? 'bg-red-100 border-red-400 border-2 rounded-lg p-2' : '' }}">
-                            <h3 class="font-bold text-indigo-600 mb-2">กระบวนการ</h3>
+                    {{-- ✅ Column 2: รูปภาพสินค้า --}}
+                    <div>
+                        <h3 class="font-bold text-indigo-600 mb-2">รูปภาพสินค้า</h3>
+                        @php
+                            $img = $product->Image ?? 'images/default-product.jpg';
+                        @endphp
+                        <img src="{{ asset($img) }}" alt="Product Image" class="w-full h-70 object-contain border">
+                    </div>
+                    {{-- ✅ Column 3: กระบวนการ --}}
+                    <div class="">
+                        <h3 class="font-bold text-indigo-600 mb-2">กระบวนการ</h3>
 
-                            <div class="flex flex-wrap gap-2 mb-3">
-                                @foreach ($processOrder as $eng => $thai)
-                                    <button type="button"
-                                        class="process-btn text-sm px-3 py-1 rounded border border-gray-300 hover:bg-blue-100"
-                                        data-target="form-{{ $product->id }}-{{ $eng }}"
-                                        @if ($eng === $latestProcessKey) data-active="true" @endif>
-                                        {{ $thai }}
-                                    </button>
-                                @endforeach
-                            </div>
-
+                        <div class="flex flex-wrap gap-2 mb-3">
                             @foreach ($processOrder as $eng => $thai)
                                 @php
                                     $jc = $jobControls[$eng] ?? null;
-                                    $isCasting = $eng === 'Casting';
-
-                                    // Only for current/latest process, check if it's late
-                                    $isCurrent = $eng === $latestProcessKey;
                                     $lateDays = null;
                                     $lateClass = '';
 
                                     if ($jc?->ScheduleDate) {
                                         $schedule = \Carbon\Carbon::parse($jc->ScheduleDate)->startOfDay();
-
-                                        if ($jc->ReceiveDate) {
-                                            $referenceDate = \Carbon\Carbon::parse($jc->ReceiveDate)->startOfDay();
-                                        } else {
-                                            $referenceDate = \Carbon\Carbon::today();
-                                        }
+                                        $referenceDate = $jc->ReceiveDate
+                                            ? \Carbon\Carbon::parse($jc->ReceiveDate)->startOfDay()
+                                            : \Carbon\Carbon::today();
 
                                         $lateDays = $referenceDate->gt($schedule) ? $schedule->diffInDays($referenceDate) : 0;
 
-                                        echo "<script>console.log('📦 Product ID: {$product->id} | Process: {$eng} | Schedule: {$schedule} | RefDate: {$referenceDate} | Late Days: {$lateDays}');</script>";
-
                                         if ($lateDays > 15) {
-                                            $lateClass = 'bg-red-400 border border-red-800';
+                                            $lateClass = 'bg-red-400 text-white border border-red-800';
                                         } elseif ($lateDays > 7) {
-                                            $lateClass = 'bg-red-100 border border-red-400';
+                                            $lateClass = 'bg-red-200 border border-red-500';
                                         } elseif ($lateDays >= 1) {
                                             $lateClass = 'bg-yellow-100 border border-yellow-400';
                                         }
                                     }
 
-                                    $formClasses = $isCasting ? '' : 'hidden';
-                                    $formClasses .= $lateClass ? " $lateClass rounded-lg p-2" : '';
+                                    $isActive = $eng === $latestProcessKey;
+                                    $buttonClasses = 'process-btn text-sm px-3 py-1 rounded border transition';
+
+                                    if ($isActive) {
+                                        $buttonClasses .= ' bg-blue-500 text-white border-blue-700';
+                                    } else {
+                                        $buttonClasses .= ' ' . $lateClass;
+                                    }
                                 @endphp
-                                <form method="POST" action="{{ route('jobcontrols.storeOrUpdate') }}" id="form-{{ $product->id }}-{{ $eng }}"
-                                    class="{{ $formClasses }} border-t pt-2 space-y-2 text-sm">
-                                    @csrf
-                                    <input type="hidden" name="product_id" value="{{ $product->id }}">
-                                    <input type="hidden" name="process" value="{{ $eng }}">
-                                    {{-- First Row: Billnumber + Factory --}}
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div>
-                                            <label>รหัสบิล:</label>
-                                            <input type="text" name="Billnumber" value="{{ $jc->Billnumber ?? '' }}" class="border p-1 w-full" >
-                                        </div>
-                                        @php
-                                            $factories = \App\Models\Factory::all();
-                                            $selectedFactoryId = old('factory_id', $jc?->factory_id);
-                                            $selectedFactory = $factories->firstWhere('id', $selectedFactoryId);
-                                            $selectedFactoryName = $selectedFactory ? $selectedFactory->FactoryName : '';
-                                        @endphp
 
-                                        <div 
-                                            x-data="{ 
-                                                open: false, 
-                                                search: '{{ $selectedFactoryName }}', 
-                                                selected: '{{ $selectedFactoryId }}' 
-                                            }" 
-                                            class="relative w-full"
-                                        >
-                                            <label>โรงงาน:</label>
-                                            <input type="hidden" name="factory_id" :value="selected">
-
-                                            <input
-                                                type="text"
-                                                x-model="search"
-                                                @focus="open = true"
-                                                @click.away="open = false"
-                                                placeholder="ค้นหาโรงงาน..."
-                                                class="w-full border p-1"
-                                            >
-
-                                            <ul x-show="open" class="absolute z-50 w-full bg-white border max-h-60 overflow-y-auto mt-1 shadow-md">
-                                                @foreach ($factories as $factory)
-                                                    <li
-                                                        @click="selected = '{{ $factory->id }}'; search = '{{ $factory->FactoryName }}'; open = false"
-                                                        x-show="search === '' || '{{ strtolower($factory->FactoryName) }}'.includes(search.toLowerCase())"
-                                                        class="px-3 py-2 hover:bg-gray-100 cursor-pointer"
-                                                    >
-                                                        {{ $factory->FactoryName }}
-                                                    </li>
-                                                @endforeach
-                                            </ul>
-                                        </div>
-                                    </div>
-
-                                    {{-- Second Row: QtyOrder + QtyReceive --}}
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div>
-                                            <label>จำนวนสั่ง:</label>
-                                            <input type="number" name="QtyOrder" value="{{ $jc->QtyOrder ?? '' }}" class="border p-1 w-full">
-                                        </div>
-                                        <div>
-                                            <label>จำนวนรับ:</label>
-                                            <input type="number" name="QtyReceive" value="{{ $jc->QtyReceive ?? '' }}" class="border p-1 w-full">
-                                        </div>
-                                    </div>
-
-                                    {{-- Third Row: TotalWeightBefore + TotalWeightAfter --}}
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div>
-                                            <label>น้ำหนักทั้งหมดก่อน:</label>
-                                            <input type="number" name="TotalWeightBefore" value="{{ $jc->TotalWeightBefore ?? '' }}" class="border p-1 w-full">
-                                        </div>
-                                        <div>
-                                            <label>น้ำหนักทั้งหมดหลัง:</label>
-                                            <input type="number" name="TotalWeightAfter" value="{{ $jc->TotalWeightAfter ?? '' }}" class="border p-1 w-full">
-                                        </div>
-                                    </div>
-
-                                    {{-- Fourth Row: AssignDate + ScheduleDate + ReceiveDate --}}
-                                    <div class="grid grid-cols-3 gap-2">
-                                        <div class="flatpickr-wrapper" data-input>
-                                            <label>วันสั่ง:</label>
-                                            <div class="flex items-center border p-1 w-full">
-                                                <input type="text"
-                                                    name="AssignDate"
-                                                    class="flatpickr w-full"
-                                                    value="{{ optional($jc)->AssignDate ? \Carbon\Carbon::parse($jc->AssignDate)->format('d-m-Y') : '' }}"
-                                                    data-input readonly>
-                                                <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
-                                            </div>
-                                        </div>
-
-                                        <div class="flatpickr-wrapper" data-input>
-                                            <label>วันกำหนดรับ:</label>
-                                            <div class="flex items-center border p-1 w-full">
-                                                <input type="text"
-                                                    name="ScheduleDate"
-                                                    class="flatpickr w-full"
-                                                    value="{{ optional($jc)->ScheduleDate ? \Carbon\Carbon::parse($jc->ScheduleDate)->format('d-m-Y') : '' }}"
-                                                    data-input readonly>
-                                                <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
-                                            </div>
-                                        </div>
-                                        <div class="flatpickr-wrapper" data-input>
-                                            <label>วันรับ:</label>
-                                            <div class="flex items-center border p-1 w-full">
-                                                <input type="text"
-                                                    name="ReceiveDate"
-                                                    class="flatpickr-max-today w-full"
-                                                    value="{{ optional($jc)->ReceiveDate ? \Carbon\Carbon::parse($jc->ReceiveDate)->format('d-m-Y') : '' }}"
-                                                    data-input
-                                                    readonly>
-                                                <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
-                                            </div>
-                                        </div>
-
-
-                                    </div>
-                                    <div class="mt-4 flex justify-end">
-                                        <button type="submit" class="w-1/3 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">บันทึก</button>
-                                    </div>
-                                </form>
-
+                                <button type="button"
+                                    class="{{ $buttonClasses }}"
+                                    data-target="form-{{ $product->id }}-{{ $eng }}"
+                                    data-late-class="{{ $lateClass }}"
+                                    @if ($isActive) data-active="true" @endif>
+                                    {{ $thai }}
+                                </button>
                             @endforeach
+
+
                         </div>
 
+                        @foreach ($processOrder as $eng => $thai)
+                            @php
+                                $jc = $jobControls[$eng] ?? null;
+                                $isCasting = $eng === 'Casting';
 
-                        {{-- ✅ Column 4: คำอธิบายสินค้า --}}
-                        <div class="flex flex-col justify-between">
-                            <div>
-                                <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดเพิ่มเติม</h3>
-                                <p>{{ $product->Description ?? 'ไม่มีรายละเอียด' }}</p>
-                            </div>
+                                // Only for current/latest process, check if it's late
+                                $isCurrent = $eng === $latestProcessKey;
+                                $lateDays = null;
+                                $lateClass = '';
+
+                                if ($jc?->ScheduleDate) {
+                                    $schedule = \Carbon\Carbon::parse($jc->ScheduleDate)->startOfDay();
+
+                                    if ($jc->ReceiveDate) {
+                                        $referenceDate = \Carbon\Carbon::parse($jc->ReceiveDate)->startOfDay();
+                                    } else {
+                                        $referenceDate = \Carbon\Carbon::today();
+                                    }
+
+                                    $lateDays = $referenceDate->gt($schedule) ? $schedule->diffInDays($referenceDate) : 0;
+
+                                    // echo "<script>console.log('📦 Product ID: {$product->id} | Process: {$eng} | Schedule: {$schedule} | RefDate: {$referenceDate} | Late Days: {$lateDays}');</script>";
+
+                                    if ($lateDays > 15) {
+                                        $lateClass = 'bg-red-400 border border-red-800';
+                                    } elseif ($lateDays > 7) {
+                                        $lateClass = 'bg-red-100 border border-red-400';
+                                    } elseif ($lateDays >= 1) {
+                                        $lateClass = 'bg-yellow-100 border border-yellow-400';
+                                    }
+                                }
+
+                                $formClasses = $isCasting ? '' : 'hidden';
+                                $formClasses .= $lateClass ? " $lateClass rounded-lg p-2" : '';
+                            @endphp
+                            <form method="POST" action="{{ route('jobcontrols.storeOrUpdate') }}"
+                                class="{{ $formClasses }} border-t pt-2 space-y-2 text-sm ajax-jobcontrol-form"
+                                data-product-id="{{ $product->id }}"
+                                data-process="{{ $eng }}"
+                                id="form-{{ $product->id }}-{{ $eng }}">
+                                @csrf
+                                <input type="hidden" name="product_id" value="{{ $product->id }}">
+                                <input type="hidden" name="process" value="{{ $eng }}">
+                                {{-- First Row: Billnumber + Factory --}}
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label>รหัสบิล:</label>
+                                        <input type="text" name="Billnumber" value="{{ $jc->Billnumber ?? '' }}" class="border p-1 w-full" >
+                                    </div>
+                                    @php
+                                        $factories = \App\Models\Factory::all();
+                                        $selectedFactoryId = old('factory_id', $jc?->factory_id);
+                                        $selectedFactory = $factories->firstWhere('id', $selectedFactoryId);
+                                        $selectedFactoryName = $selectedFactory ? $selectedFactory->FactoryName : '';
+                                    @endphp
+
+                                    <div 
+                                        x-data="{ 
+                                            open: false, 
+                                            search: '{{ $selectedFactoryName }}', 
+                                            selected: '{{ $selectedFactoryId }}' 
+                                        }" 
+                                        class="relative w-full"
+                                    >
+                                        <label>โรงงาน:</label>
+                                        <input type="hidden" name="factory_id" :value="selected">
+
+                                        <input
+                                            type="text"
+                                            x-model="search"
+                                            @focus="open = true"
+                                            @click.away="open = false"
+                                            placeholder="ค้นหาโรงงาน..."
+                                            class="w-full border p-1"
+                                        >
+
+                                        <ul x-show="open" class="absolute z-50 w-full bg-white border max-h-60 overflow-y-auto mt-1 shadow-md">
+                                            @foreach ($factories as $factory)
+                                                <li
+                                                    @click="selected = '{{ $factory->id }}'; search = '{{ $factory->FactoryName }}'; open = false"
+                                                    x-show="search === '' || '{{ strtolower($factory->FactoryName) }}'.includes(search.toLowerCase())"
+                                                    class="px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                                                >
+                                                    {{ $factory->FactoryName }}
+                                                </li>
+                                            @endforeach
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                {{-- Second Row: QtyOrder + QtyReceive --}}
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label>จำนวนสั่ง:</label>
+                                        <input type="number" name="QtyOrder" value="{{ $jc->QtyOrder ?? '' }}" class="border p-1 w-full">
+                                    </div>
+                                    <div>
+                                        <label>จำนวนรับ:</label>
+                                        <input type="number" name="QtyReceive" value="{{ $jc->QtyReceive ?? '' }}" class="border p-1 w-full">
+                                    </div>
+                                </div>
+
+                                {{-- Third Row: TotalWeightBefore + TotalWeightAfter --}}
+                                {{-- <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label>น้ำหนักทั้งหมดก่อน:</label>
+                                        <input type="number" name="TotalWeightBefore" value="{{ $jc->TotalWeightBefore ?? '' }}" class="border p-1 w-full">
+                                    </div>
+                                    <div>
+                                        <label>น้ำหนักทั้งหมดหลัง:</label>
+                                        <input type="number" name="TotalWeightAfter" value="{{ $jc->TotalWeightAfter ?? '' }}" class="border p-1 w-full">
+                                    </div>
+                                </div> --}}
+
+                                {{-- Fourth Row: AssignDate + ScheduleDate + ReceiveDate --}}
+                                <div class="grid grid-cols-3 gap-2">
+                                    <div class="flatpickr-wrapper" data-input>
+                                        <label>วันสั่ง:</label>
+                                        <div class="flex items-center border p-1 w-full">
+                                            <input type="text"
+                                                name="AssignDate"
+                                                class="flatpickr w-full"
+                                                value="{{ optional($jc)->AssignDate ? \Carbon\Carbon::parse($jc->AssignDate)->format('d-m-Y') : '' }}"
+                                                data-input readonly>
+                                            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="flatpickr-wrapper" data-input>
+                                        <label>วันกำหนดรับ:</label>
+                                        <div class="flex items-center border p-1 w-full">
+                                            <input type="text"
+                                                name="ScheduleDate"
+                                                class="flatpickr w-full"
+                                                value="{{ optional($jc)->ScheduleDate ? \Carbon\Carbon::parse($jc->ScheduleDate)->format('d-m-Y') : '' }}"
+                                                data-input readonly>
+                                            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+                                        </div>
+                                    </div>
+                                    <div class="flatpickr-wrapper" data-input>
+                                        <label>วันรับ:</label>
+                                        <div class="flex items-center border p-1 w-full">
+                                            <input type="text"
+                                                name="ReceiveDate"
+                                                class="flatpickr-max-today w-full"
+                                                value="{{ optional($jc)->ReceiveDate ? \Carbon\Carbon::parse($jc->ReceiveDate)->format('d-m-Y') : '' }}"
+                                                data-input
+                                                readonly>
+                                            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+                                        </div>
+                                    </div>
+
+
+                                </div>
+                                <div class="mt-4 flex justify-end">
+                                    <button type="submit" class="w-1/3 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">บันทึก</button>
+                                </div>
+                            </form>
+
+                        @endforeach
+                    </div>
+
+
+                    {{-- ✅ Column 4: คำอธิบายสินค้า --}}
+                    <div class="flex flex-col justify-between">
+                        <div>
+                            <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดเพิ่มเติม</h3>
+                            <p>{{ $product->Description ?? 'ไม่มีรายละเอียด' }}</p>
                         </div>
                     </div>
                 </div>
+            </div>
         {{-- @endforeach --}}
     </div>
 
     <script>
         document.querySelectorAll('.process-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const wrapper = btn.closest('div'); // button group
+                const wrapper = btn.closest('div'); // group of buttons
                 const allButtons = wrapper.querySelectorAll('.process-btn');
-                allButtons.forEach(b => b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500'));
 
+                allButtons.forEach(b => {
+                    b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500', 'border-blue-700');
+
+                    // Restore original lateness class
+                    const lateClass = b.dataset.lateClass || '';
+                    const lateClasses = lateClass.split(' ').filter(Boolean);
+                    lateClasses.forEach(cls => b.classList.add(cls));
+                });
+
+                // Apply selected (blue) highlight
+                btn.classList.remove('bg-red-400', 'bg-red-200', 'bg-yellow-100', 'text-white', 'border-red-800', 'border-red-500', 'border-yellow-400');
                 btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
 
-                const productBlock = btn.closest('.grid'); // scope to current product card
+                const productBlock = btn.closest('.grid');
                 const allForms = productBlock.querySelectorAll('form[id^="form-"]');
                 allForms.forEach(f => f.classList.add('hidden'));
 
@@ -381,6 +433,167 @@
             maxDate: "today",
             clearBtn: true
         });
+        const productIdToNumber = @json(\App\Models\Product::pluck('ProductNumber', 'id'));
+        const processNameMap = {
+            Casting: 'หล่อ',
+            Stamping: 'ปั้ม',
+            Trimming: 'แต่ง',
+            Polishing: 'ขัด',
+            Setting: 'ฝัง',
+            Plating: 'ชุบ'
+        };
+        document.querySelectorAll('.ajax-jobcontrol-form').forEach(form => {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
 
+                const formData = new FormData(form);
+                const action = form.getAttribute('action');
+
+                const submitButton = form.querySelector('button[type="submit"]');
+                submitButton.disabled = true;
+                submitButton.textContent = 'กำลังบันทึก...';
+
+                try {
+                    const response = await fetch(action, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        },
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        const productId = formData.get('product_id');
+                        const productNumber = productIdToNumber[productId] || '-';
+                        const process = formData.get('process');
+                        const processThai = processNameMap[process] || process;
+                        const data = Object.fromEntries(formData.entries());
+
+                        console.log(`✅ Saved JobControl for Product ID ${productId} (${productNumber}) - Process: ${process} (${processThai})`);
+                        console.table(data); // tabular view of all form fields
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'บันทึกสำเร็จ',
+                            html: `
+                                <div class="text-left leading-relaxed">
+                                    <strong>รหัสสินค้า:</strong> ${productNumber}<br>
+                                    <strong>กระบวนการ:</strong> ${processThai}<br>
+                                    ข้อมูลของ JobControl ได้ถูกบันทึกแล้ว
+                                </div>
+                            `,
+                            confirmButtonColor: '#3085d6'
+                        });
+                        // ✅ Remove all active flags for this product
+                        document.querySelectorAll(`[data-product-id="${productId}"] .process-btn`).forEach(btn => {
+                            btn.dataset.active = "false";
+                        });
+
+                        // ✅ Mark the current saved process as active
+                        const currentButton = document.querySelector(`[data-target="form-${productId}-${process}"]`);
+                        if (currentButton) {
+                            currentButton.dataset.active = "true";
+                            console.log(`✅ Marked as active: Process ${process} for Product ${productId}`);
+                        } else {
+                            console.warn(`⚠️ Could not find button for process ${process} of Product ${productId}`);
+                        }
+                        updateLateStatus(productId, process);
+
+                    } else {
+                        const errorText = await response.text();
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'เกิดข้อผิดพลาด',
+                            html: `<pre style="text-align:left;">${errorText}</pre>`,
+                            width: 600
+                        });
+                        console.error(errorText);
+                    }
+                } catch (err) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์',
+                        text: err.message
+                    });
+                    console.error(err);
+                } finally {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'บันทึก';
+                }
+            });
+        });
+        function updateLateStatus(productId, processKey = null) {
+            const baseSelector = `[data-product-id="${productId}"]`;
+
+            const targetProcesses = processKey
+                ? [processKey]
+                : Array.from(document.querySelectorAll(`${baseSelector} .process-btn`))
+                        .map(btn => btn.dataset.target.split('-').pop());
+
+            targetProcesses.forEach(process => {
+                const button = document.querySelector(`#form-${productId}-${process}`)?.closest('.grid')?.querySelector(`[data-target="form-${productId}-${process}"]`);
+                const form = document.querySelector(`#form-${productId}-${process}`);
+                if (!form || !button) return;
+
+                const scheduleInput = form.querySelector('[name="ScheduleDate"]');
+                const receiveInput = form.querySelector('[name="ReceiveDate"]');
+
+                const schedule = scheduleInput?.value ? dayjs(scheduleInput.value, 'DD-MM-YYYY') : null;
+                const receive = receiveInput?.value ? dayjs(receiveInput.value, 'DD-MM-YYYY') : dayjs();
+
+                let lateDays = 0;
+                if (schedule && receive && receive.isAfter(schedule)) {
+                    lateDays = receive.diff(schedule, 'day');
+                }
+
+                // Reset classes
+                button.classList.remove(
+                    'bg-blue-500', 'text-white', 'border-blue-500',
+                    'bg-red-400', 'bg-red-200', 'bg-yellow-100',
+                    'border-red-800', 'border-red-500', 'border-yellow-400'
+                );
+                form.classList.remove(
+                    'bg-red-400', 'bg-red-200', 'bg-yellow-100',
+                    'border-red-800', 'border-red-500', 'border-yellow-400'
+                );
+
+                // Reapply blue for active process
+                const isActive = button.dataset.active === "true";
+                if (isActive) {
+                    button.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
+                    console.log(`🔵 BLUE BUTTON → Product ${productId} | Process ${process} marked as ACTIVE`);
+                } else {
+                    console.log(`⚪ Not active: Product ${productId} | Process ${process}`);
+                }
+
+                // Determine lateness style for form (but NOT button if active)
+                let colorLabel = '✅ On time';
+                let lateClass = '';
+
+                if (lateDays > 15) {
+                    if (!isActive) button.classList.add('bg-red-400', 'text-white', 'border-red-800');
+                    form.classList.add('bg-red-400', 'border-red-800');
+                    form.classList.add('rounded-lg', 'p-2');
+                    lateClass = 'bg-red-400 text-white border border-red-800';
+                    colorLabel = '🔴 Very Late';
+                } else if (lateDays > 7) {
+                    if (!isActive) button.classList.add('bg-red-200', 'border-red-500');
+                    form.classList.add('bg-red-200', 'border-red-500');
+                    form.classList.add('rounded-lg', 'p-2');
+                    lateClass = 'bg-red-200 border border-red-500';
+                    colorLabel = '🟥 Late';
+                } else if (lateDays >= 1) {
+                    if (!isActive) button.classList.add('bg-yellow-100', 'border-yellow-400');
+                    form.classList.add('bg-yellow-100', 'border-yellow-400');
+                    form.classList.add('rounded-lg', 'p-2');
+                    lateClass = 'bg-yellow-100 border border-yellow-400';
+                    colorLabel = '🟨 Slightly Late';
+                }
+
+                // Update attribute
+                button.setAttribute('data-late-class', lateClass);
+
+                console.log(`📦 Product ${productId} | Process ${process} | Late Days: ${lateDays} | Button Color: ${colorLabel}`);
+            });
+        }
     </script>
 </x-app-layout>
