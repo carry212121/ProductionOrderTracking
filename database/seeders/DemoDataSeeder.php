@@ -12,18 +12,25 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
+use App\Imports\FactoryImport;
+use Maatwebsite\Excel\Facades\Excel;
 
 class DemoDataSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Create 10 factories
+        // 🟢 Step 1: Read factories from Excel
+        $import = new FactoryImport();
+        Excel::import($import, public_path('excel/Suppliers.xls')); // Adjust path or extension if xlsx
+
+        // 🟢 Step 2: Create factories in DB
         $factories = collect();
-        for ($i = 1; $i <= 20; $i++) {
-            $factories->push(Factory::create([
-                'FactoryName' => "Factory $i",
-                'FactoryNumber' => "F-$i"
-            ]));
+        foreach ($import->factories as $row) {
+            $factory = Factory::create([
+                'FactoryNumber' => $row[1], // first column in Excel
+                'FactoryName' => $row[2],   // second column
+            ]);
+            $factories->push($factory); // store in collection for later use
         }
 
         // 2. Create Production Users
