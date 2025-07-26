@@ -134,18 +134,59 @@
                 </h3>
                 <canvas id="barChartPiStatus" width="400" height="300"></canvas>
                 @if ($totalPages > 1)
-                    <div class="mt-4 flex justify-center gap-2">
-                        @for ($i = 1; $i <= $totalPages; $i++)
+                    @php
+                        $start = max(1, $page - 4);
+                        $end = min($totalPages, $page + 4);
+                        if ($page <= 5) {
+                            $start = 1;
+                            $end = min(9, $totalPages);
+                        } elseif ($page >= $totalPages - 4) {
+                            $start = max(1, $totalPages - 8);
+                            $end = $totalPages;
+                        }
+                    @endphp
+
+                    <div class="mt-4 flex flex-wrap justify-center gap-2">
+                        {{-- First page button --}}
+                        @if ($start > 1)
                             <form method="GET" action="{{ route('dashboard.index') }}">
                                 <input type="hidden" name="start_month" value="{{ $startMonth }}">
                                 <input type="hidden" name="end_month" value="{{ $endMonth }}">
                                 <input type="hidden" name="groupBy" value="{{ $groupBy }}">
-                                <input type="hidden" name="barPage" value="{{ $i }}">
-                                <button type="submit" class="px-3 py-1 border rounded {{ $i == $page ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700' }}">
-                                    {{ $i }}
-                                </button>
+                                <input type="hidden" name="barPage" value="1">
+                                <button type="submit" class="px-3 py-1 border rounded {{ $page == 1 ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700' }}">1</button>
                             </form>
+                            @if ($start > 2)
+                                <span class="px-2 text-gray-500">...</span>
+                            @endif
+                        @endif
+
+                        {{-- Centered page range --}}
+                        @for ($i = $start; $i <= $end; $i++)
+                            @if ($i != 1 && $i != $totalPages || $i == $page)
+                                <form method="GET" action="{{ route('dashboard.index') }}">
+                                    <input type="hidden" name="start_month" value="{{ $startMonth }}">
+                                    <input type="hidden" name="end_month" value="{{ $endMonth }}">
+                                    <input type="hidden" name="groupBy" value="{{ $groupBy }}">
+                                    <input type="hidden" name="barPage" value="{{ $i }}">
+                                    <button type="submit" class="px-3 py-1 border rounded {{ $i == $page ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700' }}">{{ $i }}</button>
+                                </form>
+                            @endif
                         @endfor
+
+                        {{-- Last page button --}}
+                        @if ($end < $totalPages)
+                            @if ($end < $totalPages - 1)
+                                <span class="px-2 text-gray-500">...</span>
+                            @endif
+                            <form method="GET" action="{{ route('dashboard.index') }}">
+                                <input type="hidden" name="start_month" value="{{ $startMonth }}">
+                                <input type="hidden" name="end_month" value="{{ $endMonth }}">
+                                <input type="hidden" name="groupBy" value="{{ $groupBy }}">
+                                <input type="hidden" name="barPage" value="{{ $totalPages }}">
+                                <button type="submit" class="px-3 py-1 border rounded {{ $page == $totalPages ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700' }}">{{ $totalPages }}</button>
+                            </form>
+                        @endif
                     </div>
                 @endif
             </div>
