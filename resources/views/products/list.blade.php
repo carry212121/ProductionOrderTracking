@@ -6,13 +6,37 @@
             <span class="text-gray-800 font-medium">รายการสินค้าของ {{ $pi->PInumber }}</span>
         </nav>
     </x-slot>
+        @php
+        $scheduleDate = $pi->ScheduleDate ? \Carbon\Carbon::parse($pi->ScheduleDate)->startOfDay() : null;
+        $today = \Carbon\Carbon::today();
+        $dayDiff = $scheduleDate ? $scheduleDate->diffInDays($today) : null;
+        $dayDiff = abs($dayDiff);
+        $isOverdue = $scheduleDate && $today->gt($scheduleDate);
+        $allFinished = $pi->products->every(fn($p) => $p->Status === 'Finish');
+    @endphp
     <div class="flex justify-between items-center px-6 mt-4 gap-4 flex-wrap">
         <h2 class="text-xl font-semibold text-gray-800 leading-tight">
             รายการสินค้าของ Proforma Invoice: {{ $pi->PInumber }}
         </h2>
         <p>ชื่อ Production: {{$pi->user->name}}</p>
         <p>ชื่อ พนักงานขาย: {{$pi->salesPerson->name}}</p>
-
+        <div class="col-span-1 space-y-1 text-gray-700">
+            <p><strong>วันกำหนดรับ:</strong> {{ $scheduleDate ? $scheduleDate->format('d-m-Y') : '-' }}</p>
+            @if ($scheduleDate)
+                <p>
+                    <strong>สถานะ :</strong>
+                    @if ($allFinished)
+                        <span class="text-green-600">✅ เสร็จสิ้นแล้ว</span>
+                    @else
+                        @if ($isOverdue)
+                            <span class="text-red-600">เลยกำหนดมาแล้ว {{ $dayDiff }} วัน</span>
+                        @else
+                            เหลืออีก {{ $dayDiff }} วัน
+                        @endif
+                    @endif
+                </p>
+            @endif
+        </div>
         <div class="flex items-center gap-2">
             <x-filter toggleId="filterToggleBtn" panelId="filterPanel">
                 <button class="filter-option w-full text-left hover:bg-gray-200 px-2 py-1" data-filter="all">📦 แสดงทั้งหมด</button>

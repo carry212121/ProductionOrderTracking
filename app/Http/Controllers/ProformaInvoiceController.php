@@ -168,6 +168,24 @@ class ProformaInvoiceController extends Controller
         $barChartLateYellow = [];
         $barChartLateRed = [];
         $barChartLateDarkRed = [];
+        $groupedAmounts = [];
+
+        foreach ($grouped as $id => $name) {
+            // Only filter by production (remove groupBy check entirely)
+            $pis = $proformaInvoices->filter(fn($pi) => $pi->user_id == $id);
+
+            $totalAmount = 0;
+
+            foreach ($pis as $pi) {
+                foreach ($pi->products as $product) {
+                    if ($product->Status !== 'Finish') {
+                        $totalAmount += (float) $product->Quantity * (float) $product->UnitPrice;
+                    }
+                }
+            }
+
+            $groupedAmounts[$id] = $totalAmount;
+        }
 
         if ($groupBy === 'production') {
             $users = User::where('role', 'Production')->get();
@@ -398,27 +416,125 @@ class ProformaInvoiceController extends Controller
             'startMonth', 'endMonth', 'groupBy', 'grouped',
             'barChartLabels', 'barChartOnTime',
             'barChartLateYellow', 'barChartLateRed', 'barChartLateDarkRed',
-            'page', 'totalPages', 'viewBy'
+            'page', 'totalPages', 'viewBy' , 'groupedAmounts',
         ));
     }
+
 
 
     public function index(Request $request)
     {
         $user = Auth::user();
 
-        $query = ProformaInvoice::with(['user', 'products', 'salesPerson']);
+        $query = ProformaInvoice::with(['user', 'products.jobControls', 'salesPerson']);
 
         if ($user->role == 'Production') {
             $query->where('user_id', $user->id);
-        }elseif ($user->role == 'Sales') {
+        } elseif ($user->role == 'Sales') {
             $query->where('SalesPerson', $user->id);
         }
 
         $pis = $query->latest()->get();
 
+        $processOrder = ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'];
+        $today = \Carbon\Carbon::today();
+
+        // Calculate lateness info for each PI
+        $pis = $pis->map(function ($pi) use ($processOrder, $today, $user) {
+            $scheduledDate = \Carbon\Carbon::parse($pi->ScheduleDate)->startOfDay();
+            $totalCount = $pi->products->count();
+            $finishedCount = $pi->products->where('Status', 'Finish')->count();
+            $createdDaysAgo = \Carbon\Carbon::parse($pi->created_at)->diffInDays($today);
+
+            $lateCount = 0;
+            $maxLateDays = 0;
+
+            //Log::info("📦 PI: {$pi->PInumber} — ScheduleDate: {$pi->ScheduleDate}");
+
+            foreach ($pi->products as $product) {
+                if ($product->Status === 'Finish') {
+                    //Log::info("✅ Product ID {$product->id} is finished.");
+                    continue;
+                }
+
+                $isLate = false;
+                $lateDays = 0;
+                $jobControls = $product->jobControls->keyBy('Process');
+                $latestProcess = null;
+
+                foreach ($processOrder as $process) {
+                    if (!empty($jobControls[$process]?->AssignDate)) {
+                        $latestProcess = $process;
+                    }
+                }
+
+                $jobInfo = "❌ No job control found";
+                if ($latestProcess && isset($jobControls[$latestProcess])) {
+                    $job = $jobControls[$latestProcess];
+                    $scheduleDate = \Carbon\Carbon::parse($job->ScheduleDate)->startOfDay();
+                    $receiveDate = $job->ReceiveDate;
+
+                    if ($scheduleDate->lt($today) && $receiveDate === null) {
+                        $isLate = true;
+                        $lateDays = (int) floor($scheduleDate->diffInDays($today));
+                    }
+
+                    $jobInfo = "Process: $latestProcess | ScheduleDate: {$job->ScheduleDate} | ReceiveDate: {$job->ReceiveDate}";
+                }
+
+                if (!$isLate && $pi->ScheduleDate && $scheduledDate->lt($today)) {
+                    $isLate = true;
+                    // $lateDays = $scheduledDate->diffInDays($today);
+                    $lateDays = (int) floor($scheduledDate->diffInDays($today));
+                }
+
+                if ($isLate) {
+                    $lateCount++;
+                    if ($lateDays > $maxLateDays) {
+                        $maxLateDays = $lateDays;
+                    }
+                }
+
+                //Log::info("🧩 Product ID {$product->id} — Status: {$product->Status} — $jobInfo — Late: " . ($isLate ? 'YES' : 'NO') . " — LateDays: $lateDays");
+            }
+
+            // Assign card class
+            $cardClass = 'bg-white border border-gray-200';
+            if ($maxLateDays > 15) {
+                $cardClass = 'bg-red-400 text-white border border-red-800';
+            } elseif ($maxLateDays > 7) {
+                $cardClass = 'bg-red-200 border border-red-500';
+            } elseif ($maxLateDays >= 1) {
+                $cardClass = 'bg-yellow-100 border border-yellow-400';
+            }
+
+            $priority = $finishedCount === $totalCount ? 5 : (
+                $maxLateDays > 15 ? 1 : (
+                    $maxLateDays > 7 ? 2 : (
+                        $maxLateDays >= 1 ? 3 : 4
+                    )
+                )
+            );
+            if ($user->role === 'Production' && $createdDaysAgo <= 2) {
+                $priority = 0; // highest priority
+            }
+            $pi->finishedCount = $finishedCount;
+            $pi->lateCount = $lateCount;
+            $pi->maxLateDays = $maxLateDays;
+            $pi->cardClass = $cardClass;
+            $pi->priority = $priority;
+
+            //Log::info("📊 Summary for PI {$pi->PInumber}: Finished: $finishedCount, Late: $lateCount, MaxLateDays: $maxLateDays, Class: $cardClass");
+
+            return $pi;
+        });
+
+        $pis = $pis->sortBy('priority');
+
         return view('proformaInvoice.index', compact('pis'));
     }
+
+
 
     public function show($id)
     {

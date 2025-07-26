@@ -25,6 +25,9 @@
                     <p><strong>น้ำหนัก:</strong> <span id="modalWeight"></span></p>
                     <p><strong>จำนวน:</strong> <span id="modalQuantity"></span></p>
                     <p><strong>หน่วยต่อราคา:</strong> <span id="modalUnitPrice"></span></p>
+                    @if ($groupBy === 'production')
+                        <p><strong>ราคา:</strong> <span id="modalTotalPrice"></span> USD</p>
+                    @endif
                 </div>
 
                 <!-- Right Side: Image -->
@@ -93,9 +96,22 @@
 
                 <!-- Right: Product List -->
                 <div class="bg-white shadow rounded-lg p-6 w-full lg:w-2/3">
-                    <h3 class="text-lg font-semibold mb-6">
-                        {{ $groupBy === 'production' ? 'สินค้าโดยผู้รับผิดชอบ Production'  : 'สินค้าในโรงงาน' }}
-                    </h3>
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-lg font-semibold">
+                            {{ $groupBy === 'production' ? 'สินค้าโดยผู้รับผิดชอบ Production'  : 'สินค้าในโรงงาน' }}
+                        </h3>
+
+                        @php
+                            $totalAmount = $products->sum(function ($product) {
+                                return (float) $product->Quantity * (float) $product->UnitPrice;
+                            });
+                        @endphp
+                        @if ($groupBy === 'production')
+                            <div class="text-lg font-semibold text-green-700 text-right">
+                                ยอดรวมเงินทั้งหมด: {{ number_format($totalAmount, 2) }} USD
+                            </div>
+                        @endif
+                    </div>
                     <div id="no-result-message" class="text-center text-gray-500 mt-6 hidden">
                         ไม่พบรหัสสินค้าที่ค้นหา
                     </div>
@@ -107,7 +123,7 @@
                             @foreach ($products as $product)
                                 @php
                                     $bgClass = match($product->late_status) {
-                                        'darkred' => 'bg-red-400',
+                                        'darkred' => 'bg-red-400 text-white',
                                         'red' => 'bg-red-200',
                                         'yellow' => 'bg-yellow-100',
                                         default => 'bg-white',
@@ -119,7 +135,7 @@
                                     data-month="{{ optional($product->proformaInvoice?->created_at)->format('Y-m') }}"
                                     data-pi-number="{{ $product->proformaInvoice?->PInumber ?? '-' }}"
                                     data-status="{{ 
-                                        $bgClass === 'bg-red-400' ? 'darkred' : 
+                                        $bgClass === 'bg-red-400 text-white' ? 'darkred' : 
                                         ($bgClass === 'bg-red-200' ? 'red' : 
                                         ($bgClass === 'bg-yellow-100' ? 'yellow' : 'ontime')) 
                                     }}"
@@ -129,20 +145,20 @@
                                     data-quantity="{{ $product->Quantity }}"
                                     data-unit-price="{{ $product->UnitPrice }}"
                                     data-image="{{ $product->Image }}">
-                                    <p class="text-sm text-gray-700 font-semibold">PI Number:</p>
-                                    <p class="text-sm text-gray-800 mb-1">
+                                    <p class="text-sm font-semibold">รหัส PI:</p>
+                                    <p class="text-sm mb-1">
                                         {{ $product->proformaInvoice?->PInumber ?? '-' }}
                                     </p>
 
-                                    <p class="text-sm text-gray-700 font-semibold">Product Number:</p>
-                                    <p class="text-sm text-gray-800 mb-1">
+                                    <p class="text-sm font-semibold">รหัสสินค้า:</p>
+                                    <p class="text-sm mb-1">
                                         {{ $product->ProductNumber }}
                                     </p>
 
-                                    <p class="text-sm text-gray-700 font-semibold">
-                                        {{ $groupBy === 'production' ? 'Production ID:' : 'Factory Number:' }}
+                                    <p class="text-sm font-semibold">
+                                        {{ $groupBy === 'production' ? 'รหัส Production:' : 'รหัสโรงงาน:' }}
                                     </p>
-                                    <p class="text-sm text-gray-800">
+                                    <p class="text-sm">
                                         @if($groupBy === 'production')
                                             {{ $product->proformaInvoice?->user->productionID ?? '-' }}
                                         @else
@@ -302,7 +318,19 @@
             document.getElementById('modalWeight').innerText = card.dataset.weight || '-';
             document.getElementById('modalQuantity').innerText = card.dataset.quantity || '-';
             document.getElementById('modalUnitPrice').innerText = card.dataset.unitPrice || '-';
-            
+            const quantity = parseFloat(card.dataset.quantity) || 0;
+            const unitPrice = parseFloat(card.dataset.unitPrice) || 0;
+            const totalPrice = quantity * unitPrice;
+            const modalTotalPrice = document.getElementById('modalTotalPrice');
+            if (modalTotalPrice) {
+                const quantity = parseFloat(card.dataset.quantity) || 0;
+                const unitPrice = parseFloat(card.dataset.unitPrice) || 0;
+                const totalPrice = quantity * unitPrice;
+                modalTotalPrice.innerText = totalPrice.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                });
+            }           
             const modalImage = document.getElementById('modalImage');
             const imgSrc = card.dataset.image || '';
             modalImage.src = imgSrc ? `/storage/app/public/product_images/${imgSrc}` : '/images/default-product.jpg';

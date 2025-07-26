@@ -109,6 +109,11 @@
                                 <a href="{{ route('dashboard.detail', ['id' => $id, 'groupBy' => $groupBy, 'label' => $label]) }}" class="text-blue-600 hover:underline">
                                     {{ $name }}
                                 </a>
+                                @if ($groupBy === 'production')
+                                    <span class="text-sm text-gray-600">
+                                        - ยอดรวม {{ number_format($groupedAmounts[$id] ?? 0, 2) }} USD
+                                    </span>
+                                @endif
                             </li>
                         @empty
                             <li class="text-gray-400">ไม่มีข้อมูล</li>

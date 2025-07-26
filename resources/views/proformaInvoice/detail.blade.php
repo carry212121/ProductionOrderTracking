@@ -91,6 +91,7 @@
                     }
                 }
                 $highlightRed = false;
+                $disabledAttr = $isFinished ? 'disabled' : '';
             @endphp
             <div class="relative bg-white p-6 rounded-lg shadow border product-card"
                 data-product-number="{{ $product->ProductNumber }}"
@@ -98,7 +99,7 @@
                 data-created-at="{{ $product->created_at }}">
                 {{-- Toggle Status Checkbox at top-right --}}
                 {{-- {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }} --}}
-                <form method="POST" action="{{ route('products.toggleStatus', $product->id) }}" class="absolute top-2 right-3"> 
+                <form method="POST" action="{{ route('products.toggleStatus', $product->id) }}" class="absolute top-2 right-3 {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }}"> 
                     @csrf
                     @method('PUT')
                     <input type="hidden" name="status" value="{{ $isFinished ? 'InProgress' : 'Finish' }}">
@@ -229,7 +230,7 @@
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
                                         <label>รหัสบิล:</label>
-                                        <input type="text" name="Billnumber" value="{{ $jc->Billnumber ?? '' }}" class="border p-1 w-full" >
+                                        <input type="text" name="Billnumber" value="{{ $jc->Billnumber ?? '' }}" class="border p-1 w-full "{{ $disabledAttr }} >
                                     </div>
                                     @php
                                         $factories = \App\Models\Factory::all();
@@ -256,6 +257,7 @@
                                             @click.away="open = false"
                                             placeholder="ค้นหาโรงงาน..."
                                             class="w-full border p-1"
+                                            {{ $disabledAttr }}
                                         >
 
                                         <ul x-show="open" class="absolute z-50 w-full bg-white border max-h-60 overflow-y-auto mt-1 shadow-md">
@@ -276,11 +278,11 @@
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
                                         <label>จำนวนสั่ง:</label>
-                                        <input type="number" name="QtyOrder" value="{{ $jc->QtyOrder ?? '' }}" class="border p-1 w-full">
+                                        <input type="number" name="QtyOrder" value="{{ $jc->QtyOrder ?? '' }}" class="border p-1 w-full" {{ $disabledAttr }}>
                                     </div>
                                     <div>
                                         <label>จำนวนรับ:</label>
-                                        <input type="number" name="QtyReceive" value="{{ $jc->QtyReceive ?? '' }}" class="border p-1 w-full">
+                                        <input type="number" name="QtyReceive" value="{{ $jc->QtyReceive ?? '' }}" class="border p-1 w-full" {{ $disabledAttr }}>
                                     </div>
                                 </div>
 
@@ -305,7 +307,8 @@
                                                 name="AssignDate"
                                                 class="flatpickr w-full"
                                                 value="{{ optional($jc)->AssignDate ? \Carbon\Carbon::parse($jc->AssignDate)->format('d-m-Y') : '' }}"
-                                                data-input readonly>
+                                                data-input readonly
+                                                {{ $disabledAttr }}>
                                             <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
                                         </div>
                                     </div>
@@ -317,7 +320,8 @@
                                                 name="ScheduleDate"
                                                 class="flatpickr w-full"
                                                 value="{{ optional($jc)->ScheduleDate ? \Carbon\Carbon::parse($jc->ScheduleDate)->format('d-m-Y') : '' }}"
-                                                data-input readonly>
+                                                data-input readonly
+                                                {{ $disabledAttr }}>
                                             <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
                                         </div>
                                     </div>
@@ -329,7 +333,8 @@
                                                 class="flatpickr-max-today w-full"
                                                 value="{{ optional($jc)->ReceiveDate ? \Carbon\Carbon::parse($jc->ReceiveDate)->format('d-m-Y') : '' }}"
                                                 data-input
-                                                readonly>
+                                                readonly
+                                                {{ $disabledAttr }}>
                                             <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
                                         </div>
                                     </div>
@@ -337,7 +342,7 @@
 
                                 </div>
                                 <div class="mt-4 flex justify-end">
-                                    <button type="submit" class="w-1/3 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">บันทึก</button>
+                                    <button type="submit" class="w-1/3 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"{{ $disabledAttr }}>บันทึก</button>
                                 </div>
                             </form>
 
@@ -420,10 +425,39 @@
                 else if (process === 'Stamping') daysToAdd = 14;
                 else if (['Trimming', 'Polishing', 'Setting', 'Plating'].includes(process)) daysToAdd = 7;
 
-                const scheduleDate = new Date(assignDate);
-                scheduleDate.setDate(assignDate.getDate() + daysToAdd);
+                // Define holiday ranges (year-agnostic ranges for April and December)
+                const holidayRanges = [
+                    { start: { day: 12, month: 4 }, end: { day: 17, month: 4 } }, // 12-17 April
+                    { start: { day: 29, month: 12 }, end: { day: 2, month: 1 } }, // 29 Dec - 2 Jan
+                ];
 
-                // Format to YYYY-MM-DD
+                // Function to check if a date is within any holiday range
+                function isHoliday(date) {
+                    return holidayRanges.some(range => {
+                        const start = new Date(date.getFullYear(), range.start.month - 1, range.start.day);
+                        let end = new Date(date.getFullYear(), range.end.month - 1, range.end.day);
+
+                        // If crossing year boundary (e.g. Dec → Jan), adjust end year
+                        if (range.end.month < range.start.month) {
+                            end.setFullYear(end.getFullYear() + 1);
+                        }
+
+                        return date >= start && date <= end;
+                    });
+                }
+
+                // Count non-holiday days
+                let scheduleDate = new Date(assignDate);
+                let addedDays = 0;
+
+                while (addedDays < daysToAdd) {
+                    scheduleDate.setDate(scheduleDate.getDate() + 1);
+                    if (!isHoliday(scheduleDate)) {
+                        addedDays++;
+                    }
+                }
+
+                // Format as dd-mm-yyyy
                 const yyyy = scheduleDate.getFullYear();
                 const mm = String(scheduleDate.getMonth() + 1).padStart(2, '0');
                 const dd = String(scheduleDate.getDate()).padStart(2, '0');

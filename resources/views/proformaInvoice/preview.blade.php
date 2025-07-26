@@ -13,20 +13,28 @@
         <div class="space-y-4 border border-green-300 rounded-md p-4 bg-green-50">
             <h2 class="text-lg font-bold text-green-700">📋 ข้อมูล PI</h2>
             @php $piRow = $rows[1] ?? []; @endphp
-
+            @php
+                $totalAmount = 0;
+                foreach(array_slice($rows, 1) as $row) {
+                    $qty = is_numeric($row[20] ?? null) ? $row[20] : 0;
+                    $unitPrice = is_numeric($row[22] ?? null) ? $row[22] : 0;
+                    $totalAmount += $qty * $unitPrice;
+                }
+            @endphp
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-800">
-                <div><strong>รหัส PI:</strong> <span>{{ $piRow[1] ?? '-' }}</span></div>
-                <div><strong>ชื่อลูกค้า:</strong> <span>{{ $piRow[2] ?? '-' }}</span></div>
-                <div><strong>รหัสลูกค้า:</strong> <span>{{ $piRow[3] ?? '-' }}</span></div>
-                <div><strong>พนักงานขาย:</strong> <span>{{ $piRow[4] ?? '-' }}</span></div>
-                <div><strong>วันสั่ง (ว/ด/ป):</strong> <span>{{ is_numeric($piRow[5]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[5])->format('d-m-Y') : $piRow[5] }}</span></div>
-                <div><strong>วันกำหนดรับ (ว/ด/ป):</strong> <span>{{ is_numeric($piRow[6]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[6])->format('d-m-Y') : $piRow[6] }}</span></div>
-                <div><strong>วันรับ (ว/ด/ป):</strong> <span>{{ is_numeric($piRow[7]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[7])->format('d-m-Y') : $piRow[7] }}</span></div>
-                <div><strong>รหัส PO:</strong> <span>{{ $piRow[8] ?? '-' }}</span></div>
-                <div class="md:col-span-2"><strong>รายละเอียด PI:</strong> <span>{{ $piRow[12] ?? '-' }}</span></div>
-                <div><strong>ค่าส่ง:</strong> <span>{{ $piRow[13] ?? '-' }}</span></div>
-                <div><strong>ค่าประกัน:</strong> <span>{{ $piRow[14] ?? '-' }}</span></div>
-                <div><strong>เงินฝาก:</strong> <span>{{ $piRow[15] ?? '-' }}</span></div>
+                <div><strong>รหัส PI:</strong> <span class="font-bold text-blue-600">{{ $piRow[1] ?? '-' }}</span></div>
+                <div><strong>ชื่อลูกค้า:</strong> <span class="font-bold text-blue-600">{{ $piRow[2] ?? '-' }}</span></div>
+                <div><strong>รหัสลูกค้า:</strong> <span class="font-bold text-blue-600">{{ $piRow[3] ?? '-' }}</span></div>
+                <div><strong>พนักงานขาย:</strong> <span class="font-bold text-blue-600">{{ $piRow[4] ?? '-' }}</span></div>
+                <div><strong>วันสั่ง (ว/ด/ป):</strong> <span class="font-bold text-blue-600">{{ is_numeric($piRow[5]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[5])->format('d-m-Y') : $piRow[5] }}</span></div>
+                <div><strong>วันกำหนดรับ (ว/ด/ป):</strong> <span class="font-bold text-blue-600">{{ is_numeric($piRow[6]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[6])->format('d-m-Y') : $piRow[6] }}</span></div>
+                <div><strong>วันรับ (ว/ด/ป):</strong> <span class="font-bold text-blue-600">{{ is_numeric($piRow[7]) ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($piRow[7])->format('d-m-Y') : $piRow[7] }}</span></div>
+                <div><strong>รหัส PO:</strong> <span class="font-bold text-blue-600">{{ $piRow[8] ?? '-' }}</span></div>
+                <div class="md:col-span-2"><strong>รายละเอียด PI:</strong> <span class="font-bold text-blue-600">{{ $piRow[12] ?? '-' }}</span></div>
+                <div><strong>ค่าส่ง:</strong> <span class="font-bold text-blue-600">{{ $piRow[13] ?? '-' }}</span></div>
+                <div><strong>ค่าประกัน:</strong> <span class="font-bold text-blue-600">{{ $piRow[14] ?? '-' }}</span></div>
+                <div><strong>เงินฝาก:</strong> <span class="font-bold text-blue-600">{{ $piRow[15] ?? '-' }}</span></div>
+                <div><strong>จำนวนเงินทั้งหมด:</strong> <span class="font-bold text-blue-600">{{ number_format($totalAmount, 2) }} USD</span></div>
             </div>
         </div>
 
@@ -44,7 +52,7 @@
                                 <th class="border px-4 py-2 text-left">น้ำหนัก</th>
                                 <th class="border px-4 py-2 text-left">จำนวน</th>
                                 <th class="border px-4 py-2 text-left">หน่วยต่อราคา</th>
-                                <th class="border px-4 py-2 text-left">จำนวนเงินทั้งหมด</th>
+                                <th class="border px-4 py-2 text-left">จำนวนเงิน</th>
                             </tr>
                         </thead>
                         <tbody class="text-gray-800">

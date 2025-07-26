@@ -31,7 +31,10 @@
                         <label for="excelUploadInput" class="text-blue-600 underline cursor-pointer">
                             เลือกไฟล์
                         </label>
-                        <input id="excelUploadInput" type="file" name="excel_file" accept=".xlsx,.xls" required class="hidden">
+                        <form id="excelUploadForm" method="POST" action="{{ route('proformaInvoice.importExcel') }}" enctype="multipart/form-data">
+                            @csrf
+                            <input id="excelUploadInput" type="file" name="excel_file" accept=".xlsx,.xls" required class="hidden">
+                        </form>
                     </div>
                 </div>
             </div>
@@ -76,18 +79,23 @@
                 {{-- <button class="filter-option w-full text-left hover:bg-green-100 px-2 py-1" data-filter="finished">✅ เสร็จแล้ว</button> --}}
                 <button class="filter-option w-full text-left hover:bg-red-100 px-2 py-1" data-filter="late">🔴 PIเลท</button>
             </x-filter>
-            <!-- Upload Excel Icon Button -->
-            <button 
-                onclick="document.getElementById('excelUploadModal').classList.remove('hidden')" 
-                class="p-2 rounded-full shadow relative group hover:bg-green-100"
-                title="อัปโหลด Excel"
-            >
-                <img src="https://www.svgrepo.com/show/373589/excel.svg" alt="Upload Excel" class="w-8 h-8" />
-                <span class="absolute hidden group-hover:block text-sm bg-black text-white rounded px-2 py-1 bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap">
-                    อัปโหลด Excel
-                </span>
-            </button>
+            @php
+                $role = Auth::user()->role;
+            @endphp
 
+            @if ($role === 'Admin' || $role === 'Head')
+                <!-- Upload Excel Icon Button -->
+                <button 
+                    onclick="document.getElementById('excelUploadModal').classList.remove('hidden')" 
+                    class="p-2 rounded-full shadow relative group hover:bg-green-100"
+                    title="อัปโหลด Excel"
+                >
+                    <img src="https://www.svgrepo.com/show/373589/excel.svg" alt="Upload Excel" class="w-8 h-8" />
+                    <span class="absolute hidden group-hover:block text-sm bg-black text-white rounded px-2 py-1 bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap">
+                        อัปโหลด Excel
+                    </span>
+                </button>
+            @endif
 
             <!-- Search bar -->
             <x-search-bar id="pi-search" placeholder="ค้นหา PI/ลูกค้า/PO..." class="w-64" />
@@ -101,52 +109,14 @@
         {{-- <div class="max-h-[calc(2*280px)] overflow-y-auto pr-2"> --}}
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 @forelse($pis as $pi)
-                    @php
-                        $processOrder = ['Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'];
-                        $today = \Carbon\Carbon::today();
-                        $scheduledDate = \Carbon\Carbon::parse($pi->ScheduleDate);
+                        @php
+                            $cardClass = $pi->cardClass;
+                            $finishedCount = $pi->finishedCount;
+                            $lateCount = $pi->lateCount;
 
-                        $totalCount = $pi->products->count();
-                        $finishedCount = $pi->products->where('Status', 'Finish')->count();
+                            $totalCount = $pi->products->count();
 
-                        $lateCount = 0;
-
-                        foreach ($pi->products as $product) {
-                            if ($product->Status === 'Finish') continue;
-
-                            $isLate = false;
-                            $jobControls = $product->jobControls->keyBy('Process');
-                            $latestProcess = null;
-
-                            foreach ($processOrder as $process) {
-                                if (!empty($jobControls[$process]?->AssignDate)) {
-                                    $latestProcess = $process;
-                                }
-                            }
-
-                            if ($latestProcess && isset($jobControls[$latestProcess])) {
-                                $job = $jobControls[$latestProcess];
-                                $scheduleDate = \Carbon\Carbon::parse($job->ScheduleDate);
-                                $receiveDate = $job->ReceiveDate;
-
-                                if ($scheduleDate->lt($today) && $receiveDate === null) {
-                                    $isLate = true;
-                                }
-                            }
-
-                            // fallback if no job control late
-                            if (!$isLate && $pi->ScheduleDate && $scheduledDate->lt($today)) {
-                                $isLate = true;
-                            }
-
-                            if ($isLate) $lateCount++;
-                        }
-
-                        $cardClass = 'bg-white border border-gray-200';
-                        if ($lateCount > 0) {
-                            $cardClass = 'bg-red-100 border border-red-400';
-                        }
-                    @endphp
+                        @endphp
                         <a 
                             href="{{ 
                                 auth()->user()->role === 'Head' 
@@ -167,6 +137,15 @@
                                 @if($finishedCount === $totalCount && $totalCount > 0)
                                     <span class="inline-block bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded">
                                         ✅ Finish
+                                    </span>
+                                @endif
+                                @php
+                                    $createdDaysAgo = \Carbon\Carbon::parse($pi->created_at)->diffInDays(today());
+                                @endphp
+
+                                @if($createdDaysAgo <= 2)
+                                    <span class="inline-block bg-blue-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                                        🆕 New
                                     </span>
                                 @endif
                             </div>
