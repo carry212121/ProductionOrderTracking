@@ -237,12 +237,13 @@
                                         $selectedFactoryId = old('factory_id', $jc?->factory_id);
                                         $selectedFactory = $factories->firstWhere('id', $selectedFactoryId);
                                         $selectedFactoryName = $selectedFactory ? $selectedFactory->FactoryName : '';
+                                        $selectedFactoryNumber = $selectedFactory?->FactoryNumber;
                                     @endphp
 
                                     <div 
                                         x-data="{ 
                                             open: false, 
-                                            search: '{{ $selectedFactoryName }}', 
+                                            search: '{{ $selectedFactoryNumber . '-' . $selectedFactoryName }}', 
                                             selected: '{{ $selectedFactoryId }}' 
                                         }" 
                                         class="relative w-full"
@@ -263,11 +264,11 @@
                                         <ul x-show="open" class="absolute z-50 w-full bg-white border max-h-60 overflow-y-auto mt-1 shadow-md">
                                             @foreach ($factories as $factory)
                                                 <li
-                                                    @click="selected = '{{ $factory->id }}'; search = '{{ $factory->FactoryName }}'; open = false"
-                                                    x-show="search === '' || '{{ strtolower($factory->FactoryName) }}'.includes(search.toLowerCase())"
+                                                    @click="selected = '{{ $factory->id }}'; search = '{{ $factory->FactoryNumber }}-{{ $factory->FactoryName }}'; open = false"
+                                                    x-show="search === '' || '{{ strtolower($factory->FactoryNumber . ' - ' . $factory->FactoryName) }}'.toLowerCase().includes(search.toLowerCase())"
                                                     class="px-3 py-2 hover:bg-gray-100 cursor-pointer"
                                                 >
-                                                    {{ $factory->FactoryName }}
+                                                    {{ $factory->FactoryNumber }}-{{ $factory->FactoryName }}
                                                 </li>
                                             @endforeach
                                         </ul>

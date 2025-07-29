@@ -18,7 +18,7 @@
                 </div>
                 <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
                     <x-nav-link :href="route('proformaInvoice.index')" :active="request()->routeIs('proformaInvoice.index')">
-                        {{ __('งานของฉัน') }}
+                        {{ auth()->user()?->role === 'Head' ? 'ใบแจ้งหนี้' : 'งานของฉัน' }}
                     </x-nav-link>
                 </div>
             </div>

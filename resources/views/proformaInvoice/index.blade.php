@@ -69,7 +69,11 @@
     
     <div class="flex justify-between items-center px-6 mt-4 gap-4 flex-wrap">
         <h2 class="text-xl font-semibold text-gray-800 leading-tight">
-            รายการ Proforma Invoice ของ {{auth()->user()->name}}
+            @if (auth()->user()?->role === 'Head')
+                รายการ Proforma Invoice ทั้งหมด
+            @else
+                รายการ Proforma Invoice ของ {{ auth()->user()->name }}
+            @endif
         </h2>
 
         <div class="flex items-center gap-2">
