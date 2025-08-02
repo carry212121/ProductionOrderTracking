@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Illuminate\Support\Str;
+use App\Notifications\NewPIUploaded;
 
 class ProformaInvoiceController extends Controller
 {
@@ -616,7 +617,10 @@ class ProformaInvoiceController extends Controller
                     ]
                 );
             }
-
+            if ($productionUser) {
+                Log::info("📤 Sending notification to production user ID: " . $productionUser->id);
+                $productionUser->notify(new NewPIUploaded(Auth::user(), $pi));
+            }
             Log::info("✅ Imported PI: {$pi->PInumber} with " . count($orderRows) . " products.");
             Log::info("📅 Raw OrderDate: " . $firstRow['F']);
         }

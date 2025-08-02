@@ -5,6 +5,8 @@ use App\Http\Controllers\ProformaInvoiceController;
 use App\Http\Controllers\JobControlController;
 use App\Http\Controllers\ProductController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Broadcast;
+use Illuminate\Support\Facades\Auth;
 
 Route::get('/', function () {
     return redirect('/login');
@@ -28,5 +30,16 @@ Route::middleware('auth')->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
+
+Broadcast::routes(['middleware' => ['auth']]);
+Route::get('/notifications', function () {
+    return Auth::user()->notifications; // or ->unreadNotifications
+})->middleware('auth');
+Route::post('/notifications/{id}/read', function ($id) {
+    $notification = Auth::user()->notifications->findOrFail($id);
+    $notification->markAsRead();
+    return response()->json(['status' => 'read']);
+})->middleware('auth');
+
 
 require __DIR__.'/auth.php';

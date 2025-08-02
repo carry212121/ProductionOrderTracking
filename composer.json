@@ -11,8 +11,10 @@
     "require": {
         "php": "^8.2",
         "laravel/framework": "^12.0",
+        "laravel/sanctum": "^4.2",
         "laravel/tinker": "^2.10.1",
-        "maatwebsite/excel": "^3.1"
+        "maatwebsite/excel": "^3.1",
+        "pusher/pusher-php-server": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -72,7 +74,8 @@
         "sort-packages": true,
         "allow-plugins": {
             "pestphp/pest-plugin": true,
-            "php-http/discovery": true
+            "php-http/discovery": true,
+            "composer/installers": true
         }
     },
     "minimum-stability": "stable",

@@ -155,7 +155,7 @@ class DemoDataSeeder extends Seeder
                         'ScheduleDate' => $scheduleDate->copy(),
                         'ReceiveDate' => $finalReceive,
                         'Days' => $daysLate,
-                        'Status' => 'Finish',
+                        'Status' => $finalReceive ? 'Finish' : 'InProgress',
                         'product_id' => $product->id,
                         'factory_id' => $factories->random()->id,
                     ];

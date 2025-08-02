@@ -39,6 +39,7 @@ class JobControlController extends Controller
                 'AssignDate' => $convertDate($validated['AssignDate']),
                 'ScheduleDate' => $convertDate($validated['ScheduleDate']),
                 'ReceiveDate' => $convertDate($validated['ReceiveDate']),
+                'Status' => 'Pending',
             ]
         );
 
