@@ -6,6 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class ProformaInvoice extends Model
 {
+    protected $casts = [
+        'OrderDate'    => 'date',
+        'ScheduleDate' => 'date',
+    ];
     protected $fillable = [
         'PInumber',
         'byOrder',

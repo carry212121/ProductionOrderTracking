@@ -59,7 +59,7 @@
         ไม่พบรายการสินค้าที่ตรงกับตัวกรอง
     </div>
     <div class="max-w-6xl mx-auto p-6">
-        <div class="space-y-4">
+        <div class="space-y-4 h-[400px] overflow-y-auto border rounded-lg p-4 bg-gray-50">
             @foreach($pi->products as $product)
                 {{-- @php $bgClass = $product->lateClass ?: 'bg-white'; @endphp --}}
                 <div class="product-card"
@@ -101,6 +101,5 @@
                 </div>
             @endforeach
         </div>
-
     </div>
 </x-app-layout>

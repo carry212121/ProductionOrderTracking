@@ -14,6 +14,10 @@ use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Illuminate\Support\Str;
 use App\Notifications\NewPIUploaded;
+use Illuminate\Support\Facades\Validator;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
+use Illuminate\Support\Facades\Storage;
 
 class ProformaInvoiceController extends Controller
 {
@@ -425,11 +429,21 @@ class ProformaInvoiceController extends Controller
 
     public function index(Request $request)
     {
+        $resume = null;
+        if ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
+            $stash = session('excel_resume');
+            $abs   = storage_path('app/'.($stash['path'] ?? ''));
+            if ($stash && is_file($abs)) {
+                $resume = $stash;
+            } else {
+                session()->forget('excel_resume'); // avoid broken token
+            }
+        }
         $user = Auth::user();
 
         $query = ProformaInvoice::with(['user', 'products.jobControls', 'salesPerson']);
 
-        if ($user->role == 'Production' || $user->role == 'Admin') {
+        if ($user->role == 'Production') {
             $query->where('user_id', $user->id);
         } elseif ($user->role == 'Sales') {
             $query->where('SalesPerson', $user->id);
@@ -532,60 +546,150 @@ class ProformaInvoiceController extends Controller
 
         $pis = $pis->sortBy('priority');
 
-        return view('proformaInvoice.index', compact('pis'));
+        return view('proformaInvoice.index', compact('pis', 'resume'));
     }
 
 
 
     public function show($id)
     {
-        $pi = ProformaInvoice::with(['products'])->findOrFail($id);
+        $pi = ProformaInvoice::findOrFail($id);
 
-        return view('proformaInvoice.detail', compact('pi'));
+        // Paginate products for this PI
+        $products = \App\Models\Product::with('jobControls')
+            ->where('proforma_invoice_id', $pi->id)
+            ->orderBy('id')            // or any order you prefer
+            ->paginate(20);            // <= 20 per page
+
+        $factories = Factory::select('id', 'FactoryNumber', 'FactoryName')
+            ->orderBy('FactoryNumber')
+            ->get();
+
+        $scheduleDate = $pi->ScheduleDate ? \Carbon\Carbon::parse($pi->ScheduleDate)->startOfDay() : null;
+        $today        = \Carbon\Carbon::today();
+        $dayDiff      = $scheduleDate ? $scheduleDate->diffInDays($today) : null;
+        $dayDiff      = abs($dayDiff);
+        $isOverdue    = $scheduleDate && $today->gt($scheduleDate);
+
+        // Efficient “all finished?” across ALL products of this PI (not just current page)
+        $allFinished  = !$pi->products()->where('Status', '!=', 'Finish')->exists();
+
+        return view('proformaInvoice.detail', compact(
+            'pi',
+            'products',       // <-- pass paginator
+            'factories',
+            'scheduleDate',
+            'dayDiff',
+            'isOverdue',
+            'allFinished'
+        ));
     }
+
 
     public function importExcel(Request $request)
     {
+        Log::info("📥 [importExcel] Starting import...");
+
+        // Validate file
+        Log::info("📄 Validating request file...");
         $request->validate([
             'excel_file' => 'required|file|mimes:xlsx,xls',
+            'excel_token' => 'nullable|string',
         ]);
+        Log::info("✅ File validation passed");
 
-        $file = $request->file('excel_file');
-        $spreadsheet = IOFactory::load($file->getRealPath());
+        \PhpOffice\PhpSpreadsheet\Spreadsheet::class;
+        
+        if ($request->hasFile('excel_file')) {
+            // NEW FILE TAKES PRIORITY
+            $file = $request->file('excel_file');
+            Log::info("📂 Uploaded file path: " . $file->getRealPath());
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
+
+            // refresh resume stash so index/back can reopen modal for this file
+            $token = (string) \Illuminate\Support\Str::uuid();
+            $ext   = $file->getClientOriginalExtension() ?: 'xlsx';
+            Storage::makeDirectory('tmp_excel');
+            $stored = $file->storeAs('tmp_excel', "{$token}.{$ext}");
+            session(['excel_resume' => [
+                'token'    => $token,
+                'path'     => $stored,
+                'filename' => $file->getClientOriginalName(),
+            ]]);
+        } elseif ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
+            $stash = session('excel_resume');
+            $path  = storage_path('app/'.$stash['path']);
+            Log::info("📂 Using stashed file: ".$path);
+
+            if (!is_file($path)) {
+                session()->forget('excel_resume');
+                return back()->with('excel_error', 'ไฟล์ชั่วคราวหมดอายุ กรุณาอัปโหลดใหม่');
+            }
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
+        } else {
+            return back()->with('excel_error', 'กรุณาเลือกไฟล์ Excel');
+        }
+        Log::info("📑 Spreadsheet loaded successfully");
+
         $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, true);
+        $sheet = $spreadsheet->getActiveSheet();
+        Log::info("📊 Total rows in sheet: " . count($rows));
 
-        $header = $rows[1]; // Row 1 contains column headers
-        $groupedByOrderId = [];
+        // Extract header
+        $header = $rows[1];
+        Log::info("🔹 Header row: ", $header);
 
-        // Group all rows by OrderID (column A)
-        foreach ($rows as $index => $row) {
-            if ($index === 1) continue; // Skip header
-            $orderId = $row['A'] ?? null;
-            if ($orderId) {
-                $groupedByOrderId[$orderId][] = $row;
+        $groupedByOrderCode = [];
+
+        // Group rows by OrderID
+        Log::info("🔄 Grouping rows by OrderID (Column B)...");
+        foreach ($rows as $rowIndex => $row) {
+            if ($rowIndex === 1) {
+                Log::info("⏭ Skipping header row");
+                continue;
+            }
+            $orderCode = $row['B'] ?? null;
+            if ($orderCode) {
+                $groupedByOrderCode[$orderCode][] = [
+                    'index' => $rowIndex,
+                    'data'  => $row,
+                ];
             }
         }
+        Log::info("📦 Grouped orders count: " . count($groupedByOrderCode));
 
-        foreach ($groupedByOrderId as $orderId => $orderRows) {
-            $firstRow = $orderRows[0];
-            $piNumber = trim($firstRow['B']); // OrderCode
+        // Process each order group
+        foreach ($groupedByOrderCode as $orderCode => $orderRows) {
+            Log::info("📌 Processing OrderID: {$orderCode}, rows: " . count($orderRows));
 
-            // 🔍 Skip if PI already exists
+            $firstRowIndex = $orderRows[0]['index'];
+            $firstRow      = $orderRows[0]['data'];
+            $piNumber = trim($firstRow['B']);
+            Log::info("📑 Extracted PI number: {$piNumber}");
+
+            // Skip if duplicate PI
             if (ProformaInvoice::where('PInumber', $piNumber)->exists()) {
-                Log::info("⏩ Skipped duplicate PI: $piNumber");
+                Log::info("⏩ Skipped duplicate PI: {$piNumber}");
                 return redirect()->back()->with('excel_error', "รหัส PI ซ้ำ: $piNumber");
             }
 
-            // Extract salesID and productionID from CustomerID (e.g., NES-WR/MT)
+            // Extract IDs
             $customerIdParts = explode('-', trim($firstRow['D']));
-            $suffix = $customerIdParts[1] ?? ''; // "WR/MT"
-            [$salesID, $productionID] = explode('/', $suffix . '/'); // default to prevent explode error
+            Log::info("🔍 CustomerID parts: ", $customerIdParts);
 
-            // 🔍 Lookup Sale and Production Users
+            $suffix = $customerIdParts[1] ?? '';
+            [$salesID, $productionID] = explode('/', $suffix . '/');
+            Log::info("👤 SalesID: {$salesID}, ProductionID: {$productionID}");
+
+            // Find users
             $salesUser = User::where('salesID', $salesID)->first();
+            Log::info("👤 Sales user found: " . ($salesUser?->id ?? 'none'));
+
             $productionUser = User::where('productionID', $productionID)->first();
+            Log::info("🏭 Production user found: " . ($productionUser?->id ?? 'none'));
 
-
+            // Create PI
+            Log::info("🆕 Creating ProformaInvoice record...");
             $pi = ProformaInvoice::create([
                 'PInumber'             => $piNumber,
                 'byOrder'              => trim($firstRow['C']),
@@ -595,76 +699,356 @@ class ProformaInvoiceController extends Controller
                 'FreightPrepaid'       => floatval($firstRow['N']),
                 'InsurancePrepaid'     => floatval($firstRow['O']),
                 'Deposit'              => floatval($firstRow['P']),
-                'OrderDate'            => $this->parseExcelDate($firstRow['F']),
-                'ScheduleDate'            => $this->parseExcelDate($firstRow['G']),
-                'CompletionDate'            => $this->parseExcelDate($firstRow['H']),
+                'OrderDate'      => $this->parseExcelDate($sheet->getCell("F{$firstRowIndex}"), 'DMY'),
+                'ScheduleDate'   => $this->parseExcelDate($sheet->getCell("G{$firstRowIndex}"), 'DMY'),
+                'CompletionDate' => $this->parseExcelDate($sheet->getCell("H{$firstRowIndex}"), 'DMY'),
                 'SalesPerson'          => $salesUser?->id,
                 'user_id'              => $productionUser?->id,
             ]);
+            Log::info("✅ PI created with ID: {$pi->id}");
 
-            foreach ($orderRows as $row) {
-                $quantity = trim($row['U']) . ' ' . trim($row['V']);
+            // Create/Update products
+            foreach ($orderRows as $orderRow) {
+                $rowData = $orderRow['data']; // the original A,B,C,... array
+                $quantity = trim($rowData['U']) . ' ' . trim($rowData['V']);
+                Log::info("📦 Processing ProductNumber: " . trim($rowData['Q']));
 
-                Product::updateOrCreate(
-                    ['ProductNumber' => trim($row['Q'])],
-                    [
-                        'Description'           => trim($row['R']),
-                        'ProductCustomerNumber' => trim($row['S']),
-                        'Weight'                => floatval($row['T']),
-                        'Quantity'              => $quantity,
-                        'UnitPrice'             => floatval($row['W']),
-                        'proforma_invoice_id'   => $pi->id,
-                    ]
-                );
+                Product::create([
+                    'ProductNumber'          => trim($rowData['Q']),
+                    'Description'            => trim($rowData['R']),
+                    'ProductCustomerNumber'  => trim($rowData['S']),
+                    'Weight'                 => floatval($rowData['T']),
+                    'Quantity'               => $quantity,
+                    'UnitPrice'              => floatval($rowData['W']),
+                    'proforma_invoice_id'    => $pi->id,
+                ]);
+                Log::info("✅ Product saved/updated: " . trim($rowData['Q']));
             }
+
+            // Notify production
             if ($productionUser) {
                 Log::info("📤 Sending notification to production user ID: " . $productionUser->id);
                 $productionUser->notify(new NewPIUploaded(Auth::user(), $pi));
             }
+
             Log::info("✅ Imported PI: {$pi->PInumber} with " . count($orderRows) . " products.");
-            Log::info("📅 Raw OrderDate: " . $firstRow['F']);
+            Log::info('📄 Raw Excel date cells', [
+                'OrderDate_raw'      => $firstRow['F'],
+                'ScheduleDate_raw'   => $firstRow['G'],
+                'CompletionDate_raw' => $firstRow['H'],
+                'types' => [
+                    'OrderDate'      => get_debug_type($firstRow['F']),
+                    'ScheduleDate'   => get_debug_type($firstRow['G']),
+                    'CompletionDate' => get_debug_type($firstRow['H']),
+                ]
+            ]);
         }
 
-
+        Log::info("🎯 [importExcel] Import completed successfully");
         return redirect()->back()->with('excel_success', '📥 นำเข้าข้อมูล Excel สำเร็จแล้ว');
     }
 
-    private function parseExcelDate($excelDate)
+
+    private function parseExcelDate(Cell $cell): ?string
     {
-        if (!$excelDate) return null;
+        $raw = $cell->getValue();                                // numeric serial or string
+        $display = trim((string) $cell->getFormattedValue());    // what Excel shows
 
-        try {
-            if (is_numeric($excelDate)) {
-                return \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($excelDate);
-            } else {
-                // Example input: "4/18/2025 10:23 A4P4"
-                // Step 1: Split before noise (keep date + time only)
-                $cleaned = preg_split('/\s[A-Za-z0-9]*$/', trim($excelDate))[0];
+        Log::info('📅 [parseExcelDate] cell debug', [
+            'raw_value'       => $raw,
+            'raw_type'        => get_debug_type($raw),
+            'formatted_value' => $display,
+        ]);
 
-                // Step 2: Parse cleaned datetime
-                return Carbon::parse($cleaned);
+        // 1) Numeric serial? (most reliable)
+        if (is_numeric($raw)) {
+            try {
+                $dt = ExcelDate::excelToDateTimeObject($raw);    // \DateTime
+                $out = Carbon::instance($dt)->format('Y-m-d');
+                Log::info('📅 [parseExcelDate] numeric serial -> '.$out);
+                return $out;
+            } catch (\Throwable $e) {
+                Log::warning('⚠️ [parseExcelDate] numeric conversion failed', ['msg' => $e->getMessage()]);
             }
-        } catch (\Exception $e) {
-            Log::warning("⚠️ Date parse failed: " . $excelDate);
+        }
+
+        // 2) Build a text candidate
+        $text = $display !== '' ? $display : (is_string($raw) ? trim($raw) : '');
+        if ($text === '') {
+            Log::info('📅 [parseExcelDate] empty -> null');
+            return null;
+        }
+
+        // 3) Normalize separators (., /, space -> -)
+        $norm = preg_replace('/[\.\/\s]+/u', '-', $text);
+
+        // 4) Map Thai months -> English to let DateTime parse
+        $map = [
+            // short
+            'ม.ค.'=>'Jan', 'ก.พ.'=>'Feb', 'มี.ค.'=>'Mar', 'เม.ย.'=>'Apr', 'พ.ค.'=>'May', 'มิ.ย.'=>'Jun',
+            'ก.ค.'=>'Jul', 'ส.ค.'=>'Aug', 'ก.ย.'=>'Sep', 'ต.ค.'=>'Oct', 'พ.ย.'=>'Nov', 'ธ.ค.'=>'Dec',
+            // long
+            'มกราคม'=>'January','กุมภาพันธ์'=>'February','มีนาคม'=>'March','เมษายน'=>'April','พฤษภาคม'=>'May','มิถุนายน'=>'June',
+            'กรกฎาคม'=>'July','สิงหาคม'=>'August','กันยายน'=>'September','ตุลาคม'=>'October','พฤศจิกายน'=>'November','ธันวาคม'=>'December',
+        ];
+        $norm = str_ireplace(array_keys($map), array_values($map), $norm);
+
+        // Optional: if Thai Buddhist year (25xx), convert to AD
+        // e.g. 18-สิงหาคม-2568 -> 18-August-2025
+        if (preg_match('/\b(25\d{2})\b/u', $norm, $m)) {
+            $be = (int)$m[1];
+            $ad = $be - 543;
+            $norm = preg_replace('/\b25\d{2}\b/u', (string)$ad, $norm);
+        }
+
+        // 5) Try specific formats first
+        $formats = [
+            'd-M-y','d-M-Y','d-MMM-y','d-MMM-Y','d-MMMM-y','d-MMMM-Y',
+            'm/d/Y','m-d-Y','d/m/Y','d-m-Y','Y-m-d',
+        ];
+        foreach ($formats as $fmt) {
+            try {
+                $dt = Carbon::createFromFormat($fmt, $norm);
+                if ($dt && $dt->format($fmt) === $norm) {
+                    $out = $dt->format('Y-m-d');
+                    Log::info('📅 [parseExcelDate] text parsed', ['format'=>$fmt,'out'=>$out]);
+                    return $out;
+                }
+            } catch (\Throwable $e) {
+                // continue
+            }
+        }
+
+        // 6) Fallback: free parse (handles "18-Aug-25")
+        try {
+            $out = Carbon::parse($norm)->format('Y-m-d');
+            Log::info('📅 [parseExcelDate] fallback parsed', ['src'=>$norm,'out'=>$out]);
+            return $out;
+        } catch (\Throwable $e) {
+            Log::warning('⚠️ [parseExcelDate] no matching format', ['text'=>$text]);
             return null;
         }
     }
     public function preview(Request $request)
     {
         $request->validate([
-            'excel_file' => 'required|file|mimes:xlsx,xls',
+            'excel_file'  => 'required_without:excel_token|file|mimes:xlsx,xls',
+            'excel_token' => 'nullable|string',
         ]);
 
         try {
-            $file = $request->file('excel_file');
-            $data = \Maatwebsite\Excel\Facades\Excel::toArray([], $file);
+            $token = null;
+            $filename = null;
+            $loadPath = null; // the path we will actually read for preview
+
+            if ($request->hasFile('excel_file')) {
+                // 1) Preview from the request's temp file (always present now)
+                $file     = $request->file('excel_file');
+                $loadPath = $file->getRealPath();
+                $filename = $file->getClientOriginalName();
+
+                // 2) Stash a copy for "resume" (optional; won't break preview if it fails)
+                try {
+                    $token = (string) \Illuminate\Support\Str::uuid();
+                    $ext   = $file->getClientOriginalExtension() ?: 'xlsx';
+
+                    Storage::disk('local')->makeDirectory('tmp_excel');
+                    $stored = $file->storeAs('tmp_excel', "{$token}.{$ext}", 'local'); // relative path
+
+                    // keep resume only if the stored file actually exists
+                    $abs = storage_path('app/'.$stored);
+                    if (is_file($abs)) {
+                        session([
+                            'excel_resume' => [
+                                'token'    => $token,
+                                'path'     => $stored,
+                                'filename' => $filename,
+                            ],
+                        ]);
+                    } else {
+                        // don't set a broken token
+                        $token = null;
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('⚠️ Failed to stash preview file', ['msg' => $e->getMessage()]);
+                    $token = null;
+                }
+            } elseif ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
+                // Fallback to the stashed file
+                $stash = session('excel_resume');
+                $abs   = storage_path('app/'.$stash['path']);
+                if (!is_file($abs)) {
+                    session()->forget('excel_resume');
+                    return back()->with('excel_error', 'ไฟล์ชั่วคราวหมดอายุ กรุณาเลือกไฟล์อีกครั้ง');
+                }
+                $loadPath = $abs;
+                $token    = $stash['token'] ?? null;
+                $filename = $stash['filename'] ?? null;
+            } else {
+                return back()->with('excel_error', 'กรุณาเลือกไฟล์ Excel');
+            }
+
+            // Read for preview
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($loadPath);
+            // use numeric keys (0..N) for rows and columns
+            $rows = $spreadsheet->getActiveSheet()->toArray(null, false, false, false);
 
             return view('proformaInvoice.preview', [
-                'rows' => $data[0] ?? [],
+                'rows'          => $rows,
+                'excelToken'    => $token,
+                'excelFilename' => $filename,
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error("📛 Excel Preview Error: " . $e->getMessage());
-            return redirect()->back()->with('excel_error', 'ไม่สามารถอ่านไฟล์ Excel ได้');
+            return back()->with('excel_error', 'ไม่สามารถอ่านไฟล์ Excel ได้');
+        }
+    }
+
+
+
+    public function destroy($id)
+    {
+        // Optional: Only allow Head or Admin
+        if (!in_array(Auth::user()->role, ['Head', 'Admin'])) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $pi = ProformaInvoice::findOrFail($id);
+        $pi->delete();
+
+        return redirect()
+            ->route('proformaInvoice.index')
+            ->with('success', 'Proforma Invoice ถูกลบเรียบร้อยแล้ว');
+    }
+
+    public function update(Request $request, ProformaInvoice $proformaInvoice)
+    {
+        if (!in_array(Auth::user()->role ?? '', ['Head', 'Admin'])) {
+            abort(403, 'Unauthorized');
+        }
+
+        $baseValidator = Validator::make($request->all(), [
+            'byOrder'      => ['required', 'string', 'max:255'],
+            'CustomerPO'   => ['nullable', 'string', 'max:255'],
+            'OrderDate'    => ['nullable'],
+            'ScheduleDate' => ['nullable'],
+        ], [
+            'byOrder.required' => 'กรุณากรอกชื่อลูกค้า',
+        ]);
+        if ($baseValidator->fails()) {
+            return back()->withErrors($baseValidator)->withInput();
+        }
+
+        // parse dates (Y-m-d or d-m-Y), allow null
+        $orderDate    = $this->parseFlexibleDate($request->input('OrderDate'));
+        $scheduleDate = $this->parseFlexibleDate($request->input('ScheduleDate'));
+
+        if ($request->filled('OrderDate') && !$orderDate) {
+            return back()->withErrors(['OrderDate' => 'รูปแบบวันสั่งไม่ถูกต้อง'])->withInput();
+        }
+        if ($request->filled('ScheduleDate') && !$scheduleDate) {
+            return back()->withErrors(['ScheduleDate' => 'รูปแบบวันกำหนดรับไม่ถูกต้อง'])->withInput();
+        }
+        if ($orderDate && $scheduleDate && $scheduleDate->lt($orderDate)) {
+            return back()->withErrors(['ScheduleDate' => 'วันกำหนดรับต้องเป็นวันเดียวกันหรือหลัง “วันสั่ง”'])->withInput();
+        }
+
+        // capture old values for diff
+        $labels = [
+            'byOrder'      => 'ชื่อลูกค้า',
+            'CustomerPO'   => 'รหัส PO',
+            'OrderDate'    => 'วันสั่ง',
+            'ScheduleDate' => 'วันกำหนดรับ',
+        ];
+        $old = $proformaInvoice->only(array_keys($labels));
+
+        // update
+        $proformaInvoice->byOrder      = $request->string('byOrder')->toString();
+        $proformaInvoice->CustomerPO   = $request->string('CustomerPO')->toString() ?: null;
+        $proformaInvoice->OrderDate    = $orderDate?->format('Y-m-d');
+        $proformaInvoice->ScheduleDate = $scheduleDate?->format('Y-m-d');
+        $proformaInvoice->save();
+
+        // compute diff (old → new)
+        $changes = [];
+        foreach ($labels as $key => $label) {
+            $oldRaw = $old[$key] ?? null;
+            $newRaw = $proformaInvoice->{$key};
+
+            $oldNorm = $this->normalizeForCompare($key, $oldRaw);
+            $newNorm = $this->normalizeForCompare($key, $newRaw);
+
+            if ($oldNorm !== $newNorm) {
+                $changes[$label] = [
+                    'old' => $this->formatForDisplay($key, $oldRaw),
+                    'new' => $this->formatForDisplay($key, $newRaw),
+                ];
+            }
+        }
+
+        return back()->with('changes', [
+            'title'   => 'แก้ไข PI '.$proformaInvoice->PInumber.' สำเร็จ',
+            'changes' => $changes,
+        ]);
+    }
+
+    // --- helpers ---
+
+    protected function normalizeForCompare(string $key, $value): ?string
+    {
+        if ($value === null || $value === '') return null;
+
+        if (in_array($key, ['OrderDate','ScheduleDate'], true)) {
+            try {
+                // compare on Y-m-d to avoid time noise
+                return \Illuminate\Support\Carbon::parse($value)->format('Y-m-d');
+            } catch (\Throwable $e) {
+                return (string) $value;
+            }
+        }
+        return trim((string) $value) ?: null;
+    }
+
+    protected function formatForDisplay(string $key, $value): string
+    {
+        if ($value === null || $value === '') return '—';
+
+        if (in_array($key, ['OrderDate','ScheduleDate'], true)) {
+            try {
+                return \Illuminate\Support\Carbon::parse($value)->format('d-m-Y');
+            } catch (\Throwable $e) {
+                return (string) $value;
+            }
+        }
+        return (string) $value;
+    }
+
+    /**
+     * Accept Y-m-d (hidden), d-m-Y (display), or any Carbon-parseable string.
+     * Returns Carbon|null. Empty strings become null.
+     */
+    protected function parseFlexibleDate(?string $value): ?Carbon
+    {
+        if (!$value) return null;
+        $value = trim($value);
+        if ($value === '') return null;
+
+        // Try strict formats first
+        foreach (['Y-m-d', 'd-m-Y'] as $fmt) {
+            try {
+                $dt = Carbon::createFromFormat($fmt, $value);
+                // Guard invalid dates like 31-02-2025
+                if ($dt && $dt->format($fmt) === $value) {
+                    return $dt->startOfDay();
+                }
+            } catch (\Throwable $e) { /* continue */ }
+        }
+
+        // Fallback: Carbon::parse (looser)
+        try {
+            return Carbon::parse($value)->startOfDay();
+        } catch (\Throwable $e) {
+            return null;
         }
     }
 

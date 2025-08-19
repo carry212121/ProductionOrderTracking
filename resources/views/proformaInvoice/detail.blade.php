@@ -15,25 +15,11 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     @php
-        $scheduleDate = $pi->ScheduleDate ? \Carbon\Carbon::parse($pi->ScheduleDate)->startOfDay() : null;
-        $today = \Carbon\Carbon::today();
-        $dayDiff = $scheduleDate ? $scheduleDate->diffInDays($today) : null;
-        $dayDiff = abs($dayDiff);
-        $isOverdue = $scheduleDate && $today->gt($scheduleDate);
-        $allFinished = $pi->products->every(fn($p) => $p->Status === 'Finish');
+        $processOrder = ['Casting' => 'หล่อ', 'Stamping' => 'ปั้ม', 'Trimming' => 'แต่ง', 'Polishing' => 'ขัด', 'Setting' => 'ฝัง', 'Plating' => 'ชุบ'];
     @endphp
-
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-6 mt-4 items-start">
-
-        <!-- PI Title -->
-        <div class="col-span-1">
-            <h2 class="text-xl font-semibold text-gray-800 leading-tight">
-                รายการสินค้าของ Proforma Invoice: {{ $pi->PInumber }}
-            </h2>
-        </div>
-
-        <!-- Schedule Info -->
-        <div class="col-span-1 space-y-1 text-gray-700">
+        <div><h2 class="text-xl font-semibold text-gray-800">รายการสินค้าของ Proforma Invoice: {{ $pi->PInumber }}</h2></div>
+        <div class="space-y-1 text-gray-700">
             <p><strong>วันกำหนดรับ:</strong> {{ $scheduleDate ? $scheduleDate->format('d-m-Y') : '-' }}</p>
             @if ($scheduleDate)
                 <p>
@@ -50,8 +36,6 @@
                 </p>
             @endif
         </div>
-
-        <!-- Filter & Search -->
         <div class="col-span-1 flex items-center justify-end gap-2 flex-wrap">
             <x-filter toggleId="filterToggleBtn" panelId="filterPanel">
                 <button class="filter-option w-full text-left hover:bg-gray-200 px-2 py-1" data-filter="all">📦 แสดงทั้งหมด</button>
@@ -61,335 +45,388 @@
             </x-filter>
             <x-search-bar id="product-search" placeholder="ค้นหารหัสสินค้า/สินค้าลูกค้า..." class="w-64" />
         </div>
-
     </div>
 
+    <div id="no-result-message" class="text-center text-gray-500 mt-6 hidden">ไม่พบรหัสสินค้า/สินค้าลูกค้าที่ค้นหา</div>
+    <div id="no-results" class="text-gray-500 text-center my-4 hidden">ไม่พบรายการสินค้าที่ตรงกับตัวกรอง</div>
 
-    <div id="no-result-message" class="text-center text-gray-500 mt-6 hidden">
-        ไม่พบรหัสสินค้า/สินค้าลูกค้าที่ค้นหา
-    </div>
-    <div id="no-results" class="text-gray-500 text-center my-4 hidden">
-        ไม่พบรายการสินค้าที่ตรงกับตัวกรอง
-    </div>
-
+    {{-- List --}}
     <div class="px-6 py-4 space-y-6">
-        @foreach($pi->products as $index => $product)
+        @foreach($products as $index => $product)
             @php
-                $processOrder = ['Casting' => 'หล่อ', 'Stamping' => 'ปั้ม', 'Trimming' => 'แต่ง', 'Polishing' => 'ขัด', 'Setting' => 'ฝัง', 'Plating' => 'ชุบ'];
+                $rowNumber = $products->firstItem() + $index;
                 $jobControls = $product->jobControls->keyBy('Process');
-                $hasAnyValue = $jobControls->filter(function ($jc) {
-                    return $jc->Billnumber || $jc->factory_id || $jc->QtyOrder || $jc->QtyReceive || $jc->TotalWeightBefore || $jc->TotalWeightAfter || $jc->AssignDate || $jc->ScheduleDate || $jc->ReceiveDate;
-                })->isNotEmpty();
+                $hasAnyValue = $jobControls->filter(fn($jc) =>
+                    $jc->Billnumber || $jc->factory_id || $jc->QtyOrder || $jc->QtyReceive ||
+                    $jc->TotalWeightBefore || $jc->TotalWeightAfter ||
+                    $jc->AssignDate || $jc->ScheduleDate || $jc->ReceiveDate
+                )->isNotEmpty();
 
-                $isFinished = $product->Status === 'Finish'; // Assuming you have a `Status` column in product
-                $status = $isFinished ? 'Finish' : ($hasAnyValue ? 'InProgress' : 'Pending');
-                    // Get the latest process
+                $isFinished = $product->Status === 'Finish';
+                $status     = $isFinished ? 'Finish' : ($hasAnyValue ? 'InProgress' : 'Pending');
+
                 $latestProcessKey = null;
                 foreach ($processOrder as $eng => $thai) {
                     if (!empty($jobControls[$eng]?->AssignDate)) {
                         $latestProcessKey = $eng;
                     }
                 }
-                $highlightRed = false;
+                $activeEng    = $latestProcessKey ?? 'Casting';
+                $activeJc     = $jobControls[$activeEng] ?? null;
                 $disabledAttr = $isFinished ? 'disabled' : '';
             @endphp
+
             <div class="relative bg-white p-6 rounded-lg shadow border product-card"
-                data-product-number="{{ $product->ProductNumber }}"
-                data-customer-number="{{ $product->ProductCustomerNumber }}"
-                data-created-at="{{ $product->created_at }}">
-                {{-- Toggle Status Checkbox at top-right --}}
-                {{-- {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }} --}}
-                <form method="POST" action="{{ route('products.toggleStatus', $product->id) }}" class="absolute top-2 right-3 {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }}"> 
-                    @csrf
-                    @method('PUT')
+                 data-product-number="{{ $product->ProductNumber }}"
+                 data-customer-number="{{ $product->ProductCustomerNumber }}"
+                 data-created-at="{{ $product->created_at }}">
+
+                {{-- Toggle Finish --}}
+                <form method="POST" action="{{ route('products.toggleStatus', $product->id) }}" class="absolute top-2 right-3 {{ $isFinished ? 'opacity-60 pointer-events-none' : '' }}">
+                    @csrf @method('PUT')
                     <input type="hidden" name="status" value="{{ $isFinished ? 'InProgress' : 'Finish' }}">
                     <label class="inline-flex items-center text-sm font-medium text-gray-700 gap-1">
                         {{ $status === 'Finish' ? '✅ เสร็จแล้ว' : ($status === 'InProgress' ? '🔄 ดำเนินการ' : '🕓 รอดำเนินการ') }}
-                        <input type="checkbox"
-                            class="ml-1"
-                            {{ $isFinished ? 'checked' : '' }}
-                            onchange="confirmToggleStatus(this)"
-                        >
+                        <input type="checkbox" class="ml-1" {{ $isFinished ? 'checked' : '' }} onchange="confirmToggleStatus(this)">
                     </label>
                 </form>
 
                 <div class="grid grid-cols-1 md:grid-cols-[15%_20%_45%_20%] gap-4">
-
-                    {{-- ✅ Column 1: รายละเอียดสินค้า --}}
+                    {{-- Col 1: product --}}
                     <div>
                         <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดสินค้า</h3>
-                        <p>ลำดับที่: {{ $index + 1 }}</p>
+                        <p>ลำดับที่: {{ $rowNumber }}</p>
                         <p>รหัสสินค้า: {{ $product->ProductNumber }}</p>
                         <p>รหัสสินค้าลูกค้า: {{ $product->ProductCustomerNumber }}</p>
                         <p>จำนวน: {{ $product->Quantity }}</p>
                         <p>น้ำหนัก: {{ $product->Weight }}</p>
                     </div>
 
-                    {{-- ✅ Column 2: รูปภาพสินค้า --}}
+                    {{-- Col 2: image --}}
                     <div>
                         <h3 class="font-bold text-indigo-600 mb-2">รูปภาพสินค้า</h3>
                         @php
-                            $img = $product->Image ?? 'images/default-product.jpg';
+                            $remote = 'http://192.168.0.100/picture/' . rawurlencode($product->ProductNumber) . '.JPG';
+                            $default = asset('images/default-product.jpg');
                         @endphp
-                        <img src="{{ asset($img) }}" alt="Product Image" class="w-full h-70 object-contain border">
+                        <img
+                            src="{{ $remote }}"
+                            onerror="this.onerror=null; this.src='{{ $default }}';"
+                            alt="Product Image"
+                            class="max-h-full max-w-full object-scale-down"
+                            loading="lazy"
+                        />
                     </div>
-                    {{-- ✅ Column 3: กระบวนการ --}}
-                    <div class="">
-                        <h3 class="font-bold text-indigo-600 mb-2">กระบวนการ</h3>
 
+                    {{-- Col 3: processes (buttons + mount) --}}
+                    <div>
+                        <h3 class="font-bold text-indigo-600 mb-2">กระบวนการ</h3>
                         <div class="flex flex-wrap gap-2 mb-3">
                             @foreach ($processOrder as $eng => $thai)
                                 @php
                                     $jc = $jobControls[$eng] ?? null;
-                                    $lateDays = null;
                                     $lateClass = '';
-
                                     if ($jc?->ScheduleDate) {
                                         $schedule = \Carbon\Carbon::parse($jc->ScheduleDate)->startOfDay();
                                         $referenceDate = $jc->ReceiveDate
                                             ? \Carbon\Carbon::parse($jc->ReceiveDate)->startOfDay()
                                             : \Carbon\Carbon::today();
-
                                         $lateDays = $referenceDate->gt($schedule) ? $schedule->diffInDays($referenceDate) : 0;
-
-                                        if ($lateDays > 15) {
-                                            $lateClass = 'bg-red-400 text-white border border-red-800';
-                                        } elseif ($lateDays > 7) {
-                                            $lateClass = 'bg-red-200 border border-red-500';
-                                        } elseif ($lateDays >= 1) {
-                                            $lateClass = 'bg-yellow-100 border border-yellow-400';
-                                        }
+                                        if ($lateDays > 15)      $lateClass = 'bg-red-400 text-white border border-red-800';
+                                        elseif ($lateDays > 7)   $lateClass = 'bg-red-200 border border-red-500';
+                                        elseif ($lateDays >= 1)  $lateClass = 'bg-yellow-100 border border-yellow-400';
                                     }
-
-                                    $isActive = $eng === $latestProcessKey;
-                                    $buttonClasses = 'process-btn text-sm px-3 py-1 rounded border transition';
-
-                                    if ($isActive) {
-                                        $buttonClasses .= ' bg-blue-500 text-white border-blue-700';
-                                    } else {
-                                        $buttonClasses .= ' ' . $lateClass;
-                                    }
+                                    $isActive = $eng === $activeEng;
+                                    $btnClasses = 'process-btn text-sm px-3 py-1 rounded border transition ' . ($isActive ? 'bg-blue-500 text-white border-blue-700' : $lateClass);
                                 @endphp
-
                                 <button type="button"
-                                    class="{{ $buttonClasses }}"
-                                    data-target="form-{{ $product->id }}-{{ $eng }}"
-                                    data-late-class="{{ $lateClass }}"
-                                    @if ($isActive) data-active="true" @endif>
+                                        class="{{ $btnClasses }}"
+                                        data-product-id="{{ $product->id }}"
+                                        data-process="{{ $eng }}"
+                                        data-target="form-{{ $product->id }}-{{ $eng }}"
+                                        data-late-class="{{ $lateClass }}"
+                                        @if ($isActive) data-active="true" @endif>
                                     {{ $thai }}
                                 </button>
                             @endforeach
-
-
                         </div>
 
-                        @foreach ($processOrder as $eng => $thai)
-                            @php
-                                $jc = $jobControls[$eng] ?? null;
-                                $isCasting = $eng === 'Casting';
-
-                                // Only for current/latest process, check if it's late
-                                $isCurrent = $eng === $latestProcessKey;
-                                $lateDays = null;
-                                $lateClass = '';
-
-                                if ($jc?->ScheduleDate) {
-                                    $schedule = \Carbon\Carbon::parse($jc->ScheduleDate)->startOfDay();
-
-                                    if ($jc->ReceiveDate) {
-                                        $referenceDate = \Carbon\Carbon::parse($jc->ReceiveDate)->startOfDay();
-                                    } else {
-                                        $referenceDate = \Carbon\Carbon::today();
-                                    }
-
-                                    $lateDays = $referenceDate->gt($schedule) ? $schedule->diffInDays($referenceDate) : 0;
-
-                                    // echo "<script>console.log('📦 Product ID: {$product->id} | Process: {$eng} | Schedule: {$schedule} | RefDate: {$referenceDate} | Late Days: {$lateDays}');</script>";
-
-                                    if ($lateDays > 15) {
-                                        $lateClass = 'bg-red-400 border border-red-800';
-                                    } elseif ($lateDays > 7) {
-                                        $lateClass = 'bg-red-100 border border-red-400';
-                                    } elseif ($lateDays >= 1) {
-                                        $lateClass = 'bg-yellow-100 border border-yellow-400';
-                                    }
-                                }
-
-                                $formClasses = $isCasting ? '' : 'hidden';
-                                $formClasses .= $lateClass ? " $lateClass rounded-lg p-2" : '';
-                            @endphp
-                            <form method="POST" action="{{ route('jobcontrols.storeOrUpdate') }}"
-                                class="{{ $formClasses }} border-t pt-2 space-y-2 text-sm ajax-jobcontrol-form"
-                                data-product-id="{{ $product->id }}"
-                                data-process="{{ $eng }}"
-                                id="form-{{ $product->id }}-{{ $eng }}">
-                                @csrf
-                                <input type="hidden" name="product_id" value="{{ $product->id }}">
-                                <input type="hidden" name="process" value="{{ $eng }}">
-                                {{-- First Row: Billnumber + Factory --}}
-                                <div class="grid grid-cols-2 gap-2">
-                                    <div>
-                                        <label>รหัสบิล:</label>
-                                        <input type="text" name="Billnumber" value="{{ $jc->Billnumber ?? '' }}" class="border p-1 w-full "{{ $disabledAttr }} >
-                                    </div>
-                                    @php
-                                        $factories = \App\Models\Factory::all();
-                                        $selectedFactoryId = old('factory_id', $jc?->factory_id);
-                                        $selectedFactory = $factories->firstWhere('id', $selectedFactoryId);
-                                        $selectedFactoryName = $selectedFactory ? $selectedFactory->FactoryName : '';
-                                        $selectedFactoryNumber = $selectedFactory?->FactoryNumber;
-                                    @endphp
-
-                                    <div 
-                                        x-data="{ 
-                                            open: false, 
-                                            search: '{{ $selectedFactoryNumber . '-' . $selectedFactoryName }}', 
-                                            selected: '{{ $selectedFactoryId }}' 
-                                        }" 
-                                        class="relative w-full"
-                                    >
-                                        <label>โรงงาน:</label>
-                                        <input type="hidden" name="factory_id" :value="selected">
-
-                                        <input
-                                            type="text"
-                                            x-model="search"
-                                            @focus="open = true"
-                                            @click.away="open = false"
-                                            placeholder="ค้นหาโรงงาน..."
-                                            class="w-full border p-1"
-                                            {{ $disabledAttr }}
-                                        >
-
-                                        <ul x-show="open" class="absolute z-50 w-full bg-white border max-h-60 overflow-y-auto mt-1 shadow-md">
-                                            @foreach ($factories as $factory)
-                                                <li
-                                                    @click="selected = '{{ $factory->id }}'; search = '{{ $factory->FactoryNumber }}-{{ $factory->FactoryName }}'; open = false"
-                                                    x-show="search === '' || '{{ strtolower($factory->FactoryNumber . ' - ' . $factory->FactoryName) }}'.toLowerCase().includes(search.toLowerCase())"
-                                                    class="px-3 py-2 hover:bg-gray-100 cursor-pointer"
-                                                >
-                                                    {{ $factory->FactoryNumber }}-{{ $factory->FactoryName }}
-                                                </li>
-                                            @endforeach
-                                        </ul>
-                                    </div>
-                                </div>
-
-                                {{-- Second Row: QtyOrder + QtyReceive --}}
-                                <div class="grid grid-cols-2 gap-2">
-                                    <div>
-                                        <label>จำนวนสั่ง:</label>
-                                        <input type="number" name="QtyOrder" value="{{ $jc->QtyOrder ?? '' }}" class="border p-1 w-full" {{ $disabledAttr }}>
-                                    </div>
-                                    <div>
-                                        <label>จำนวนรับ:</label>
-                                        <input type="number" name="QtyReceive" value="{{ $jc->QtyReceive ?? '' }}" class="border p-1 w-full" {{ $disabledAttr }}>
-                                    </div>
-                                </div>
-
-                                {{-- Third Row: TotalWeightBefore + TotalWeightAfter --}}
-                                {{-- <div class="grid grid-cols-2 gap-2">
-                                    <div>
-                                        <label>น้ำหนักทั้งหมดก่อน:</label>
-                                        <input type="number" name="TotalWeightBefore" value="{{ $jc->TotalWeightBefore ?? '' }}" class="border p-1 w-full">
-                                    </div>
-                                    <div>
-                                        <label>น้ำหนักทั้งหมดหลัง:</label>
-                                        <input type="number" name="TotalWeightAfter" value="{{ $jc->TotalWeightAfter ?? '' }}" class="border p-1 w-full">
-                                    </div>
-                                </div> --}}
-
-                                {{-- Fourth Row: AssignDate + ScheduleDate + ReceiveDate --}}
-                                <div class="grid grid-cols-3 gap-2">
-                                    <div class="flatpickr-wrapper" data-input>
-                                        <label>วันสั่ง:</label>
-                                        <div class="flex items-center border p-1 w-full">
-                                            <input type="text"
-                                                name="AssignDate"
-                                                class="flatpickr w-full"
-                                                value="{{ optional($jc)->AssignDate ? \Carbon\Carbon::parse($jc->AssignDate)->format('d-m-Y') : '' }}"
-                                                data-input readonly
-                                                {{ $disabledAttr }}>
-                                            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
-                                        </div>
-                                    </div>
-
-                                    <div class="flatpickr-wrapper" data-input>
-                                        <label>วันกำหนดรับ:</label>
-                                        <div class="flex items-center border p-1 w-full">
-                                            <input type="text"
-                                                name="ScheduleDate"
-                                                class="flatpickr w-full"
-                                                value="{{ optional($jc)->ScheduleDate ? \Carbon\Carbon::parse($jc->ScheduleDate)->format('d-m-Y') : '' }}"
-                                                data-input readonly
-                                                {{ $disabledAttr }}>
-                                            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
-                                        </div>
-                                    </div>
-                                    <div class="flatpickr-wrapper" data-input>
-                                        <label>วันรับ:</label>
-                                        <div class="flex items-center border p-1 w-full">
-                                            <input type="text"
-                                                name="ReceiveDate"
-                                                class="flatpickr-max-today w-full"
-                                                value="{{ optional($jc)->ReceiveDate ? \Carbon\Carbon::parse($jc->ReceiveDate)->format('d-m-Y') : '' }}"
-                                                data-input
-                                                readonly
-                                                {{ $disabledAttr }}>
-                                            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
-                                        </div>
-                                    </div>
-
-
-                                </div>
-                                <div class="mt-4 flex justify-end">
-                                    <button type="submit" class="w-1/3 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"{{ $disabledAttr }}>บันทึก</button>
-                                </div>
-                            </form>
-
-                        @endforeach
+                        {{-- Mount: only render the *active* form initially --}}
+                        <div id="process-form-{{ $product->id }}" data-product-id="{{ $product->id }}">
+                            <div class="process-pane" data-pane="{{ $activeEng }}">
+                                @include('proformaInvoice._process_form', [
+                                    'product'      => $product,
+                                    'eng'          => $activeEng,
+                                    'jc'           => $activeJc,
+                                    'factories'    => $factories,
+                                    'disabledAttr' => $disabledAttr,
+                                ])
+                            </div>
+                        </div>
                     </div>
 
-
-                    {{-- ✅ Column 4: คำอธิบายสินค้า --}}
+                    {{-- Col 4: desc --}}
                     <div class="flex flex-col justify-between">
                         <div>
                             <h3 class="font-bold text-indigo-600 mb-2">รายละเอียดเพิ่มเติม</h3>
-                            <p>{{ $product->Description ?? 'ไม่มีรายละเอียด' }}</p>
+                            <div class="w-64 h-64 overflow-y-auto border p-2 rounded">
+                                {{ $product->Description ?? 'ไม่มีรายละเอียด' }}
+                            </div>
                         </div>
                     </div>
+
                 </div>
             </div>
         @endforeach
     </div>
 
+    {{-- Pagination --}}
+    <div class="px-6 pb-8">
+    {{ $products->withQueryString()->links() }}
+    </div>
+
     <script>
-        document.querySelectorAll('.process-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const wrapper = btn.closest('div'); // group of buttons
-                const allButtons = wrapper.querySelectorAll('.process-btn');
+        const formCache = new Map(); // `${productId}:${process}` -> HTML
 
-                allButtons.forEach(b => {
-                    b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500', 'border-blue-700');
+        function initFlatpickrInside(el) {
+            el.querySelectorAll('.flatpickr-wrapper').forEach(wrapper => {
+                flatpickr(wrapper, { dateFormat: "d-m-Y", allowInput: false, wrap: true, clearBtn: true });
+            });
+            el.querySelectorAll('.flatpickr-max-today').forEach(inp => {
+                flatpickr(inp, { dateFormat: "d-m-Y", allowInput: false, maxDate: "today", clearBtn: true });
+            });
+        }
+        function bindAutoSchedule(scope=document) {
+            scope.querySelectorAll('form[id^="form-"]').forEach(form => {
+            if (form.dataset.autoBound === "1") return; // prevent double bindings
+            form.dataset.autoBound = "1";
 
-                    // Restore original lateness class
-                    const lateClass = b.dataset.lateClass || '';
-                    const lateClasses = lateClass.split(' ').filter(Boolean);
-                    lateClasses.forEach(cls => b.classList.add(cls));
+            const assign = form.querySelector('input[name="AssignDate"]');
+            const sched  = form.querySelector('input[name="ScheduleDate"]');
+            const proc   = form.querySelector('input[name="process"]');
+            if (!assign || !sched || !proc) return;
+
+            const recompute = () => {
+                const [d, m, y] = (assign.value || '').split('-');
+                const assignDate = new Date(`${y}-${m}-${d}`);
+                if (!assignDate.getTime()) return;
+
+                // per-process default days
+                let daysToAdd = 7;
+                const p = proc.value;
+                if (p === 'Casting') daysToAdd = 10;
+                else if (p === 'Stamping') daysToAdd = 14;
+
+                // holiday ranges (Thai New Year & New Year cross-year safe)
+                const holidayRanges = [
+                { start: { day:12, month:4 }, end: { day:17, month:4 } },
+                { start: { day:29, month:12 }, end: { day:2,  month:1 } },
+                ];
+                const isHoliday = (date) => holidayRanges.some(r => {
+                const s = new Date(date.getFullYear(), r.start.month-1, r.start.day);
+                const e = new Date(date.getFullYear() + (r.end.month < r.start.month ? 1 : 0), r.end.month-1, r.end.day);
+                return date >= s && date <= e;
                 });
 
-                // Apply selected (blue) highlight
-                btn.classList.remove('bg-red-400', 'bg-red-200', 'bg-yellow-100', 'text-white', 'border-red-800', 'border-red-500', 'border-yellow-400');
+                let cur = new Date(assignDate), added = 0;
+                while (added < daysToAdd) {
+                cur.setDate(cur.getDate() + 1);
+                if (!isHoliday(cur)) added++;
+                }
+
+                const yyyy = cur.getFullYear();
+                const mm = String(cur.getMonth()+1).padStart(2,'0');
+                const dd = String(cur.getDate()).padStart(2,'0');
+                sched.value = `${dd}-${mm}-${yyyy}`;
+            };
+
+            // Bind native events
+            assign.addEventListener('change', recompute);
+            assign.addEventListener('input', recompute);
+
+            // If flatpickr is attached, hook into it as well
+            if (assign._flatpickr) {
+                assign._flatpickr.config.onChange.push(recompute);
+                assign._flatpickr.config.onClose.push(recompute);
+            }
+            });
+        }
+        async function loadProcessForm(productId, process) {
+            const key = `${productId}:${process}`;
+            if (formCache.has(key)) return formCache.get(key);
+
+            const url = `{{ route('products.process-form', ':id') }}`
+                .replace(':id', productId) + `?process=${encodeURIComponent(process)}`;
+
+            const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }});
+            if (!res.ok) throw new Error(`โหลดฟอร์มไม่สำเร็จ (${res.status})`);
+            const html = await res.text();
+            formCache.set(key, html);
+            return html;
+        }
+        document.querySelectorAll('.process-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const productId = btn.dataset.productId;
+                const process   = btn.dataset.process;
+                const group     = btn.closest('.mb-3') || btn.parentElement;
+
+                // Reset all buttons in the same product's group
+                group.querySelectorAll('.process-btn').forEach(b => {
+                    b.dataset.active = "false";
+                    b.classList.remove(
+                        'bg-blue-500', 'text-white', 'border-blue-500', 'border-blue-700',
+                        'bg-red-400', 'bg-red-200', 'bg-yellow-100',
+                        'border-red-800', 'border-red-500', 'border-yellow-400'
+                    );
+                    // restore lateness class (not for active one)
+                    const lateClass = (b.dataset.lateClass || '').split(' ').filter(Boolean);
+                    lateClass.forEach(cls => b.classList.add(cls));
+                });
+
+                // Mark clicked button as active + blue
+                btn.dataset.active = "true";
+                btn.classList.remove(
+                    'bg-red-400', 'bg-red-200', 'bg-yellow-100',
+                    'border-red-800', 'border-red-500', 'border-yellow-400'
+                );
                 btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
 
-                const productBlock = btn.closest('.grid');
-                const allForms = productBlock.querySelectorAll('form[id^="form-"]');
-                allForms.forEach(f => f.classList.add('hidden'));
-
-                const targetId = btn.dataset.target;
-                document.getElementById(targetId).classList.remove('hidden');
+                try {
+                    await ensureProcessPane(productId, process);
+                    showProcessPane(productId, process);
+                } catch (e) {
+                    console.error(e);
+                    const mount = document.getElementById(`process-form-${productId}`);
+                    if (mount) {
+                        let err = mount.querySelector('.process-load-error');
+                        if (!err) {
+                            err = document.createElement('div');
+                            err.className = 'process-load-error py-2 text-red-600';
+                            mount.appendChild(err);
+                        }
+                        err.textContent = 'โหลดไม่สำเร็จ ลองอีกครั้ง';
+                    }
+                }
             });
         });
+        window.productIdToNumber = @json(\App\Models\Product::pluck('ProductNumber', 'id'));
+        window.processNameMap    = @json($processOrder);
+        // AJAX save wiring
+        function wireAjaxSave(scope=document) {
+        scope.querySelectorAll('.ajax-jobcontrol-form').forEach(form => {
+            if (form.dataset.bound === "1") return;   // prevent double binding
+            form.dataset.bound = "1";
+
+            form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(form);
+            const action = form.getAttribute('action');
+            const submitButton = form.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            submitButton.textContent = 'กำลังบันทึก...';
+
+            try {
+                const response = await fetch(action, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                body: formData
+                });
+
+                if (!response.ok) throw new Error(await response.text());
+
+                // Build the detailed success modal here
+                const productId = formData.get('product_id');
+                const productNumber = (window.productIdToNumber || {})[productId] || '-';
+                const process = formData.get('process');
+                const processThai = processNameMap[process] || process;
+
+                Swal.fire({
+                icon: 'success',
+                title: 'บันทึกสำเร็จ',
+                html: `
+                    <div class="text-left leading-relaxed">
+                    <strong>รหัสสินค้า:</strong> ${productNumber}<br>
+                    <strong>กระบวนการ:</strong> ${processThai}<br>
+                    ข้อมูลของ JobControl ได้ถูกบันทึกแล้ว
+                    </div>
+                `,
+                confirmButtonColor: '#3085d6'
+                });
+
+                // ✅ Remove all active flags for this product
+                document.querySelectorAll(`[data-product-id="${productId}"] .process-btn`).forEach(btn => {
+                    btn.dataset.active = "false";
+                });
+
+                // ✅ Mark the current saved process as active
+                const currentButton = document.querySelector(`[data-target="form-${productId}-${process}"]`);
+                if (currentButton) {
+                    currentButton.dataset.active = "true";
+                    console.log(`✅ Marked as active: Process ${process} for Product ${productId}`);
+                } else {
+                    console.warn(`⚠️ Could not find button for process ${process} of Product ${productId}`);
+                }
+                updateLateStatus(productId, process);
+
+            } catch (err) {
+                Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', html: `<pre style="text-align:left;">${err.message}</pre>`, width: 600 });
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'บันทึก';
+            }
+            });
+        });
+        }
+
+        async function fetchProcessHTML(productId, process) {
+            const key = `${productId}:${process}`;
+            if (formCache.has(key)) return formCache.get(key);
+
+            const url = `{{ route('products.process-form', ':id') }}`
+            .replace(':id', productId) + `?process=${encodeURIComponent(process)}`;
+            const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }});
+            if (!res.ok) throw new Error(`โหลดฟอร์มไม่สำเร็จ (${res.status})`);
+            const html = await res.text();
+            formCache.set(key, html);
+            return html;
+        }
+
+        async function ensureProcessPane(productId, process) {
+            const mount = document.getElementById(`process-form-${productId}`);
+            // already mounted? just return it
+            let pane = mount.querySelector(`.process-pane[data-pane="${process}"]`);
+            if (pane) return pane;
+
+            // fetch and append new pane (do NOT replace mount.innerHTML)
+            const html = await fetchProcessHTML(productId, process);
+            pane = document.createElement('div');
+            pane.className = 'process-pane';
+            pane.dataset.pane = process;
+            pane.style.display = 'none';
+            pane.innerHTML = html;
+            mount.appendChild(pane);
+
+            // init only the newly added pane
+            initFlatpickrInside(pane);
+            bindAutoSchedule(pane);
+            wireAjaxSave(pane);
+
+            return pane;
+        }
+
+        function showProcessPane(productId, process) {
+            const mount = document.getElementById(`process-form-${productId}`);
+            mount.querySelectorAll('.process-pane').forEach(p => {
+            p.style.display = (p.dataset.pane === process) ? 'block' : 'none';
+            });
+        }
+
+        // First paint: init for server-rendered active forms only
+        wireAjaxSave(document);
+        initFlatpickrInside(document);
+        bindAutoSchedule(document);
+
         document.querySelectorAll('.mb-3.flex').forEach(wrapper => {
             const activeBtn = wrapper.querySelector('.process-btn[data-active="true"]');
             const btn = activeBtn || wrapper.querySelector('.process-btn');
@@ -523,95 +560,7 @@
             maxDate: "today",
             clearBtn: true
         });
-        const productIdToNumber = @json(\App\Models\Product::pluck('ProductNumber', 'id'));
-        const processNameMap = {
-            Casting: 'หล่อ',
-            Stamping: 'ปั้ม',
-            Trimming: 'แต่ง',
-            Polishing: 'ขัด',
-            Setting: 'ฝัง',
-            Plating: 'ชุบ'
-        };
 
-        document.querySelectorAll('.ajax-jobcontrol-form').forEach(form => {
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-
-                const formData = new FormData(form);
-                const action = form.getAttribute('action');
-
-                const submitButton = form.querySelector('button[type="submit"]');
-                submitButton.disabled = true;
-                submitButton.textContent = 'กำลังบันทึก...';
-
-                try {
-                    const response = await fetch(action, {
-                        method: 'POST',
-                        headers: {
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                        },
-                        body: formData
-                    });
-
-                    if (response.ok) {
-                        const productId = formData.get('product_id');
-                        const productNumber = productIdToNumber[productId] || '-';
-                        const process = formData.get('process');
-                        const processThai = processNameMap[process] || process;
-                        const data = Object.fromEntries(formData.entries());
-
-                        console.log(`✅ Saved JobControl for Product ID ${productId} (${productNumber}) - Process: ${process} (${processThai})`);
-                        console.table(data); // tabular view of all form fields
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'บันทึกสำเร็จ',
-                            html: `
-                                <div class="text-left leading-relaxed">
-                                    <strong>รหัสสินค้า:</strong> ${productNumber}<br>
-                                    <strong>กระบวนการ:</strong> ${processThai}<br>
-                                    ข้อมูลของ JobControl ได้ถูกบันทึกแล้ว
-                                </div>
-                            `,
-                            confirmButtonColor: '#3085d6'
-                        });
-                        // ✅ Remove all active flags for this product
-                        document.querySelectorAll(`[data-product-id="${productId}"] .process-btn`).forEach(btn => {
-                            btn.dataset.active = "false";
-                        });
-
-                        // ✅ Mark the current saved process as active
-                        const currentButton = document.querySelector(`[data-target="form-${productId}-${process}"]`);
-                        if (currentButton) {
-                            currentButton.dataset.active = "true";
-                            console.log(`✅ Marked as active: Process ${process} for Product ${productId}`);
-                        } else {
-                            console.warn(`⚠️ Could not find button for process ${process} of Product ${productId}`);
-                        }
-                        updateLateStatus(productId, process);
-
-                    } else {
-                        const errorText = await response.text();
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'เกิดข้อผิดพลาด',
-                            html: `<pre style="text-align:left;">${errorText}</pre>`,
-                            width: 600
-                        });
-                        console.error(errorText);
-                    }
-                } catch (err) {
-                    Swal.fire({
-                        icon: 'error',
-                        title: 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์',
-                        text: err.message
-                    });
-                    console.error(err);
-                } finally {
-                    submitButton.disabled = false;
-                    submitButton.textContent = 'บันทึก';
-                }
-            });
-        });
         function updateLateStatus(productId, processKey = null) {
             const baseSelector = `[data-product-id="${productId}"]`;
 
@@ -686,7 +635,6 @@
                 console.log(`📦 Product ${productId} | Process ${process} | Late Days: ${lateDays} | Button Color: ${colorLabel}`);
             });
         }
-
 
     </script>
 </x-app-layout>

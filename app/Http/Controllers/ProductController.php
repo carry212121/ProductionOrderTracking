@@ -354,5 +354,27 @@ class ProductController extends Controller
         return view('products.detail', compact('pi', 'product'));
     }
 
+    public function processForm(Product $product)
+    {
+        $eng = request('process'); // 'Casting', 'Stamping', 'Trimming', 'Polishing', 'Setting', 'Plating'
+        abort_unless(in_array($eng, ['Casting','Stamping','Trimming','Polishing','Setting','Plating'], true), 404);
+
+        $product->loadMissing('jobControls');
+        $jc = $product->jobControls->firstWhere('Process', $eng);
+
+        // Only what we need
+        $factories = Factory::select('id','FactoryNumber','FactoryName')
+            ->orderBy('FactoryNumber')
+            ->get();
+
+        // Return only the form (no layout)
+        return view('proformaInvoice._process_form', [
+            'product'      => $product,
+            'eng'          => $eng,
+            'jc'           => $jc,
+            'factories'    => $factories,
+            'disabledAttr' => $product->Status === 'Finish' ? 'disabled' : '',
+        ]);
+    }
 
 }

@@ -19,6 +19,7 @@ Alpine.start();
 import Swal from 'sweetalert2';
 
 document.addEventListener("DOMContentLoaded", () => {
+    if (!window.LaravelUserId) return;
     console.log("📡 Echo load?:", Echo);
     console.log("👤 LaravelUserId:", window.LaravelUserId);
 
@@ -35,18 +36,23 @@ document.addEventListener("DOMContentLoaded", () => {
                     position: "right",
                     stopOnFocus: true,
                     style: {
-                        background: "#4f46e5",
-                        color: "#fff",
-                        borderRadius: "6px",
-                        padding: "10px 15px",
+                        background: "#9ca3af", 
+                        color: "#ffffff",
+                        borderRadius: "4px",    
+                        padding: "16px 20px",
+                        width: "300px",         
+                        height: "80px",         
+                        display: "flex",
+                        alignItems: "center",
                     }
                 }).showToast();
-
+                Alpine.store('notifications').unreadCount++;
             });
     }
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+    if (!window.LaravelUserId) return;
     const notifList = document.getElementById('notificationList');
 
     // ✅ Load unread count immediately

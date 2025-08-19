@@ -4,6 +4,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProformaInvoiceController;
 use App\Http\Controllers\JobControlController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Auth;
@@ -24,13 +25,22 @@ Route::get('/proforma-invoice/{id}/products', [ProductController::class, 'list']
 Route::get('/proforma-invoice/{pi_id}/products/{product_id}', [ProductController::class, 'detail'])->name('products.detail');
 Route::post('/proforma-invoice/import', [ProformaInvoiceController::class, 'importExcel'])->name('proformaInvoice.importExcel');
 Route::post('/proformaInvoice/preview', [ProformaInvoiceController::class, 'preview'])->name('proformaInvoice.preview');
-
+Route::get('/products/{product}/process-form', [ProductController::class, 'processForm'])
+    ->name('products.process-form');
+Route::delete('/proforma-invoices/{id}', [ProformaInvoiceController::class, 'destroy'])
+    ->name('proformaInvoice.destroy');
+Route::put('/proformaInvoice/{proformaInvoice}', [ProformaInvoiceController::class, 'update'])
+     ->name('proformaInvoice.update');
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
+Route::get('/users', [UserController::class, 'index'])
+    ->name('users.index');
+Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
+Route::post('/users', [UserController::class, 'store'])->name('users.store');
 Broadcast::routes(['middleware' => ['auth']]);
 Route::get('/notifications', function () {
     return Auth::user()->notifications; // or ->unreadNotifications

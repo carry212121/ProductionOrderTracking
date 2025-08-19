@@ -5,6 +5,10 @@
         </nav>
     </x-slot>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js"></script>
+
     <!-- Excel Upload Modal -->
     <div id="excelUploadModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
         <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-3xl min-h-[400px] flex flex-col justify-between relative">
@@ -33,7 +37,8 @@
                         </label>
                         <form id="excelUploadForm" method="POST" action="{{ route('proformaInvoice.importExcel') }}" enctype="multipart/form-data">
                             @csrf
-                            <input id="excelUploadInput" type="file" name="excel_file" accept=".xlsx,.xls" required class="hidden">
+                            <input id="excelUploadInput" type="file" name="excel_file" accept=".xlsx,.xls" class="hidden" {{ empty($resume) ? 'required' : '' }}>
+                            <input type="hidden" name="excel_token" id="excelTokenUpload" value="{{ $resume['token'] ?? '' }}">
                         </form>
                     </div>
                 </div>
@@ -59,17 +64,86 @@
             </div>
 
             <!-- Hidden Preview Form -->
-            <form id="previewForm" method="POST" action="{{ route('proformaInvoice.preview') }}" enctype="multipart/form-data" style="display: none;">
+            <form id="previewForm" method="POST" action="{{ route('proformaInvoice.preview') }}" enctype="multipart/form-data" style="display:none;">
                 @csrf
                 <input type="file" name="excel_file" id="previewExcelFileInput">
+                <input type="hidden" name="excel_token" id="excelTokenPreview" value="{{ $resume['token'] ?? '' }}">
             </form>
         </div>
+    </div>
+    <!-- Edit PI Modal -->
+    <div id="editPIModal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center">
+    <div class="bg-white w-full max-w-xl rounded-lg shadow-lg p-6 relative">
+        <button type="button" class="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                onclick="closeEditPIModal()">✖</button>
+
+        <h3 class="text-lg font-semibold mb-4 text-center">แก้ไข Proforma Invoice</h3>
+
+        <form id="editPIForm" method="POST" action="">
+        @csrf
+        @method('PUT')
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        {{-- Row 0 (full width): PI number (read-only) --}}
+        <div class="md:col-span-2">
+            <label class="block text-sm font-medium text-gray-700 mb-1">เลขที่ PI</label>
+            <div id="piNumberText" class="bg-gray-50 border border-gray-300 rounded px-3 py-2 text-gray-700"></div>
+        </div>
+
+        {{-- Row 1: รหัสลูกค้า + พนักงานขาย (both read-only) --}}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">รหัสลูกค้า</label>
+            <div id="customerIdText" class="bg-gray-50 border border-gray-300 rounded px-3 py-2 text-gray-700"></div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">พนักงานขาย</label>
+            <div id="salespersonNameText" class="bg-gray-50 border border-gray-300 rounded px-3 py-2 text-gray-700"></div>
+        </div>
+
+        {{-- Row 2: ชื่อลูกค้า + รหัส PO (both editable) --}}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อลูกค้า</label>
+            <input type="text" name="byOrder" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">รหัส PO</label>
+            <input type="text" name="CustomerPO" class="w-full border rounded px-3 py-2">
+        </div>
+
+        {{-- Row 3: วันสั่ง + วันกำหนดรับ (flatpickr visible + hidden real inputs) --}}
+        <div class="flatpickr-wrapper" data-input>
+            <label class="block text-sm font-medium text-gray-700 mb-1">วันสั่ง</label>
+            <div class="flex items-center border p-1 w-full rounded">
+            <input type="text" id="OrderDate_display" class="flatpickr w-full px-2 py-1" data-input readonly>
+            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+            </div>
+        </div>
+        <div class="flatpickr-wrapper" data-input>
+            <label class="block text-sm font-medium text-gray-700 mb-1">วันกำหนดรับ</label>
+            <div class="flex items-center border p-1 w-full rounded">
+            <input type="text" id="ScheduleDate_display" class="flatpickr w-full px-2 py-1" data-input readonly>
+            <button type="button" class="text-red-500 px-2" title="Clear Date" data-clear>✕</button>
+            </div>
+        </div>
+
+        {{-- Hidden actual fields (Y-m-d) --}}
+        <input type="hidden" name="OrderDate" id="OrderDate">
+        <input type="hidden" name="ScheduleDate" id="ScheduleDate">
+        </div>
+
+        <div class="flex justify-between mt-6">
+            <button type="button" onclick="closeEditPIModal()" class="text-blue-600 hover:underline">ยกเลิก</button>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">บันทึก</button>
+        </div>
+        </form>
+    </div>
     </div>
 
     
     <div class="flex justify-between items-center px-6 mt-4 gap-4 flex-wrap">
         <h2 class="text-xl font-semibold text-gray-800 leading-tight">
-            @if (auth()->user()?->role === 'Head')
+            @if (auth()->user()?->role === 'Head' || auth()->user()?->role === 'Admin')
                 รายการ Proforma Invoice ทั้งหมด
             @else
                 รายการ Proforma Invoice ของ {{ auth()->user()->name }}
@@ -111,82 +185,102 @@
 
     <div class="py-6 px-6">
         {{-- <div class="max-h-[calc(2*280px)] overflow-y-auto pr-2"> --}}
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                @forelse($pis as $pi)
-                        @php
-                            $cardClass = $pi->cardClass;
-                            $finishedCount = $pi->finishedCount;
-                            $lateCount = $pi->lateCount;
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            @forelse($pis as $pi)
+                @php
+                    $cardClass = $pi->cardClass;
+                    $finishedCount = $pi->finishedCount;
+                    $lateCount = $pi->lateCount;
+                    $totalCount = $pi->products->count();
+                    $to = auth()->user()->role === 'Head'
+                        ? route('products.list', ['id' => $pi->id])
+                        : route('proformaInvoice.show', $pi->id);
+                @endphp
 
-                            $totalCount = $pi->products->count();
+                <!-- Whole card clickable -->
+                <div
+                    class="pi-card rounded-lg shadow p-5 transition duration-300 hover:shadow-lg hover:scale-[1.02] cursor-pointer {{ $cardClass }}"
+                    onclick="window.location.href='{{ $to }}'"
+                    data-pi="{{ $pi->PInumber }}"
+                    data-customer="{{ $pi->byOrder }}"
+                    data-po="{{ $pi->CustomerPO }}"
+                    data-status="{{ $lateCount > 0 ? 'late' : ($finishedCount === $totalCount ? 'finished' : 'inprogress') }}"
+                >
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="text-lg font-bold text-indigo-600">
+                            รหัส PI: {{ $pi->PInumber }}
+                        </h3>
 
-                        @endphp
-                        <a 
-                            href="{{ 
-                                auth()->user()->role === 'Head' 
-                                    ? route('products.list', ['id' => $pi->id]) 
-                                    : route('proformaInvoice.show', $pi->id) 
-                            }}"
-                            class="block hover:shadow-lg transition duration-300 pi-card"
-                            data-pi="{{ $pi->PInumber }}"
-                            data-customer="{{ $pi->byOrder }}"
-                            data-po="{{ $pi->CustomerPO }}"
-                            data-status="{{ $lateCount > 0 ? 'late' : ($finishedCount === $totalCount ? 'finished' : 'inprogress') }}"
-                        >
-                        <div class="{{ $cardClass }} rounded-lg shadow p-5">
-                            <div class="flex justify-between items-start mb-2">
-                                <h3 class="text-lg font-bold text-indigo-600">
-                                    รหัส PI: {{ $pi->PInumber }}
-                                </h3>
-                                @if($finishedCount === $totalCount && $totalCount > 0)
-                                    <span class="inline-block bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded">
-                                        ✅ Finish
-                                    </span>
-                                @endif
-                                @php
-                                    $createdDaysAgo = \Carbon\Carbon::parse($pi->created_at)->diffInDays(today());
-                                @endphp
+                        @if($finishedCount === $totalCount && $totalCount > 0)
+                            <span class="inline-block bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                                ✅ Finish
+                            </span>
+                        @endif
 
-                                @if($createdDaysAgo <= 2)
-                                    <span class="inline-block bg-blue-500 text-white text-xs font-semibold px-2 py-1 rounded">
-                                        🆕 New
-                                    </span>
-                                @endif
-                            </div>
-                            {{-- Row 1: ชื่อลูกค้า + รหัส PO --}}
-                            <div class="flex justify-between mb-2">
-                                <p class="w-1/2 pr-2 whitespace-nowrap overflow-hidden text-ellipsis">
-                                    <span class="font-semibold">ชื่อลูกค้า:</span> {{ $pi->byOrder }}
-                                </p>
-                                <p class="w-1/2 whitespace-nowrap overflow-hidden text-ellipsis">
-                                    <span class="font-semibold">รหัส PO:</span> {{ $pi->CustomerPO }}
-                                </p>
-                            </div>
+                        @php $createdDaysAgo = \Carbon\Carbon::parse($pi->created_at)->diffInDays(today()); @endphp
+                        @if($createdDaysAgo <= 2)
+                            <span class="inline-block bg-blue-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                                🆕 New
+                            </span>
+                        @endif
+                    </div>
 
-                            {{-- Row 2: รหัสลูกค้า + พนักงานขาย --}}
-                            <div class="flex justify-between mb-2">
-                                <p class="w-1/2 pr-2 whitespace-nowrap overflow-hidden text-ellipsis">
-                                    <span class="font-semibold">รหัสลูกค้า:</span> {{ $pi->CustomerID }}
-                                </p>
-                                <p class="w-1/2 whitespace-nowrap overflow-hidden text-ellipsis">
-                                    <span class="font-semibold">พนักงานขาย:</span> {{ $pi->Salesperson?->name ?? '-' }}
-                                </p>
-                            </div>
-                            <div class="mb-2">
-                                <p><span class="font-semibold">จำนวนสินค้าที่เสร็จแล้ว:</span> {{ $finishedCount }} / {{ $totalCount }} รายการ</p>
-                            </div>
-                            <div class="mb-2">
-                            <p><span class="font-semibold">จำนวนสินค้าที่เลท:</span> {{ $lateCount }} / {{ $totalCount }} รายการ</p>
-                            </div>
-                            <p><span class="font-semibold">วันกำหนดรับ:</span> 
-                                {{ \Carbon\Carbon::parse($pi->ScheduleDate)->format('d-m-Y') }}
-                            </p>
+                    <div class="flex justify-between mb-2">
+                        <p class="w-1/2 pr-2 truncate"><span class="font-semibold">ชื่อลูกค้า:</span> {{ $pi->byOrder }}</p>
+                        <p class="w-1/2 truncate"><span class="font-semibold">รหัส PO:</span> {{ $pi->CustomerPO }}</p>
+                    </div>
+
+                    <div class="flex justify-between mb-2">
+                        <p class="w-1/2 pr-2 truncate"><span class="font-semibold">รหัสลูกค้า:</span> {{ $pi->CustomerID }}</p>
+                        <p class="w-1/2 truncate"><span class="font-semibold">พนักงานขาย:</span> {{ $pi->Salesperson?->name ?? '-' }}</p>
+                    </div>
+
+                    <div class="mb-2">
+                        <p><span class="font-semibold">จำนวนสินค้าที่เสร็จแล้ว:</span> {{ $finishedCount }} / {{ $totalCount }} รายการ</p>
+                    </div>
+                    <div class="mb-2">
+                        <p><span class="font-semibold">จำนวนสินค้าที่เลท:</span> {{ $lateCount }} / {{ $totalCount }} รายการ</p>
+                    </div>
+                    <div class="flex justify-between mb-2">
+                        <p class="w-1/2 pr-2 truncate"><span class="font-semibold">วันสั่ง:</span> {{ $pi->OrderDate ? $pi->OrderDate->format('d-m-Y') : '-' }}</p>
+                        <p class="w-1/2 truncate"><span class="font-semibold">วันกำหนดรับ:</span> {{ $pi->ScheduleDate ? $pi->ScheduleDate->format('d-m-Y') : '-' }}</p>
+                    </div>
+                    @if (in_array(auth()->user()?->role, ['Head', 'Admin']))
+                        <div class="flex justify-end mt-3 space-x-2">
+                            <a href="#"
+                            onclick="openEditPIModal(this); event.stopPropagation(); return false;"
+                            class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
+                            data-update-url="{{ route('proformaInvoice.update', $pi->id) }}"
+                            data-byorder="{{ e($pi->byOrder) }}"
+                            data-customerpo="{{ e($pi->CustomerPO) }}"
+                            data-orderdate="{{ $pi->OrderDate?->format('Y-m-d') ?? '' }}"
+                            data-scheduledate="{{ $pi->ScheduleDate?->format('Y-m-d') ?? '' }}"
+                            data-pinumber="{{ e($pi->PInumber) }}"
+                            data-customerid="{{ e($pi->CustomerID) }}"
+                            data-salespersonname="{{ e($pi->Salesperson?->name ?? '-') }}"
+                            >
+                            ✏️ แก้ไข
+                            </a>
+
+                            <form action="{{ route('proformaInvoice.destroy', $pi->id) }}" method="POST" class="delete-form" style="display:inline;">
+                                @csrf
+                                @method('DELETE')
+                                <button type="button"
+                                        onclick="event.stopPropagation(); confirmDelete(this)"
+                                        class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded">
+                                    🗑️ ลบ
+                                </button>
+                            </form>
+
                         </div>
-                    </a>
-                @empty
-                    <div class="text-gray-500 col-span-3">ไม่มีรายการ PI สำหรับคุณ</div>
-                @endforelse
-            </div>
+                    @endif
+                </div>
+            @empty
+                <div class="text-gray-500 col-span-3">ไม่มีรายการ PI สำหรับคุณ</div>
+            @endforelse
+        </div>
+
+
         {{-- </div> --}}
     </div>
     <script>
@@ -233,6 +327,14 @@
             });
 
             updateNoResultsMessage(); // Call once initially
+        });
+
+        document.getElementById('excelUploadInput')?.addEventListener('change', function () {
+            document.getElementById('excelTokenUpload')?.setAttribute('value','');
+            document.getElementById('excelTokenPreview')?.setAttribute('value','');
+            const file = this.files[0];
+            const nameEl = document.getElementById('selectedFileName');
+            if (nameEl) nameEl.textContent = file ? file.name : 'ยังไม่ได้เลือกไฟล์';
         });
         const dropArea = document.querySelector('.drop-area');
         const fileInput = document.getElementById('excelUploadInput');
@@ -294,27 +396,123 @@
             if (previewInput) previewInput.value = '';
         }
         function submitPreviewForm() {
-            const fileInput = document.getElementById('excelUploadInput');
+            const fileInput    = document.getElementById('excelUploadInput');
             const previewInput = document.getElementById('previewExcelFileInput');
+            const tokenInput   = document.getElementById('excelTokenPreview');
+
             const file = fileInput.files[0];
 
-            if (!file) {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'กรุณาเลือกไฟล์ก่อนดูตัวอย่าง',
-                    confirmButtonText: 'ตกลง'
-                });
+            if (file) {
+            // clone file to hidden input
+            const dt = new DataTransfer(); dt.items.add(file);
+            previewInput.files = dt.files;
+            tokenInput.value = ''; // force server to use the new file
+            } else if (!tokenInput.value) {
+                Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ก่อนดูตัวอย่าง', confirmButtonText: 'ตกลง' });
                 return;
             }
-
-            // Clone file to hidden form
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            previewInput.files = dataTransfer.files;
 
             document.getElementById('previewForm').submit();
         }
 
+        let fpOrder, fpSchedule;
+
+        function syncHiddenDates() {
+            const orderHidden = document.getElementById('OrderDate');
+            const schedHidden = document.getElementById('ScheduleDate');
+
+            orderHidden.value = (fpOrder?.selectedDates?.[0])
+            ? flatpickr.formatDate(fpOrder.selectedDates[0], 'Y-m-d')
+            : '';
+
+            schedHidden.value = (fpSchedule?.selectedDates?.[0])
+            ? flatpickr.formatDate(fpSchedule.selectedDates[0], 'Y-m-d')
+            : '';
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Init pickers (Thai locale, display d-m-Y)
+            fpOrder = flatpickr('#OrderDate_display', {
+            dateFormat: 'd-m-Y',
+            locale: 'th',
+            allowInput: false,
+            clickOpens: true,
+            onChange: syncHiddenDates
+            });
+
+            fpSchedule = flatpickr('#ScheduleDate_display', {
+            dateFormat: 'd-m-Y',
+            locale: 'th',
+            allowInput: false,
+            clickOpens: true,
+            onChange: syncHiddenDates
+            });
+
+            // Clear buttons
+            document.querySelectorAll('[data-clear]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const wrapper = btn.closest('.flatpickr-wrapper');
+                const input = wrapper.querySelector('input.flatpickr');
+                const instance = input?._flatpickr;
+                if (instance) {
+                instance.clear();
+                syncHiddenDates();
+                }
+            });
+            });
+
+            // Ensure hidden fields are correct on submit
+            document.getElementById('editPIForm')?.addEventListener('submit', () => {
+            syncHiddenDates();
+            });
+        });
+        function openEditPIModal(btn) {
+            const modal = document.getElementById('editPIModal');
+            const form  = document.getElementById('editPIForm');
+
+            // Set form action
+            form.action = btn.dataset.updateUrl;
+
+            // Prefill inputs
+            form.byOrder.value      = btn.dataset.byorder || '';
+            form.CustomerPO.value   = btn.dataset.customerpo || '';
+            form.OrderDate.value    = btn.dataset.orderdate || '';
+            form.ScheduleDate.value = btn.dataset.scheduledate || '';
+            
+
+            // Read-only texts
+            document.getElementById('piNumberText').textContent   = btn.dataset.pinumber || '-';
+            document.getElementById('customerIdText').textContent = btn.dataset.customerid || '-';
+            document.getElementById('salespersonNameText').textContent = btn.dataset.salespersonname || '-';
+
+            const order = btn.dataset.orderdate || null;
+            const sched = btn.dataset.scheduledate || null;
+
+            if (fpOrder)   fpOrder.setDate(order, true, 'Y-m-d');
+            if (fpSchedule) fpSchedule.setDate(sched, true, 'Y-m-d');
+
+            // Sync hidden fields right away
+            syncHiddenDates();
+            // Show modal
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeEditPIModal() {
+            const modal = document.getElementById('editPIModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // Click outside to close
+        document.getElementById('editPIModal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'editPIModal') closeEditPIModal();
+        });
+
+        // Esc to close
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeEditPIModal();
+        });
     </script>
     @if(session('excel_success'))
     <script>
@@ -337,5 +535,75 @@
         });
     </script>
     @endif
-    
+    <script>
+    function confirmDelete(button) {
+        event.stopPropagation(); // Prevent card click redirect
+
+        Swal.fire({
+            title: 'คุณแน่ใจหรือไม่?',
+            text: "การลบนี้ไม่สามารถย้อนกลับได้!",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: 'ใช่, ลบเลย',
+            cancelButtonText: 'ยกเลิก'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Submit the form
+                button.closest('form').submit();
+            }
+        });
+    }
+    </script>
+    @if(session('changes'))
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+    const data = @json(session('changes'));
+    const items = data.changes || {};
+    let html = '';
+
+    const hasChanges = Object.keys(items).length > 0;
+    if (hasChanges) {
+        for (const [label, diff] of Object.entries(items)) {
+        const oldVal = (diff.old ?? '—');
+        const newVal = (diff.new ?? '—');
+        html += `<div class="text-left mb-1">
+                    <b>${label}</b>:
+                    <span class="text-gray-500 line-through">${oldVal}</span>
+                    &nbsp;→&nbsp;
+                    <span class="text-green-600 font-semibold">${newVal}</span>
+                </div>`;
+        }
+    }
+
+    Swal.fire({
+        icon: hasChanges ? 'success' : 'info',
+        title: data.title || (hasChanges ? 'แก้ไขสำเร็จ' : 'ไม่มีการเปลี่ยนแปลง'),
+        html: hasChanges ? html : 'ไม่มีฟิลด์ไหนถูกแก้ไข',
+        confirmButtonText: 'ตกลง'
+    });
+    });
+    </script>
+    @endif    
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+    const resumeToken = @json($resume['token'] ?? null);
+    const resumeName  = @json($resume['filename'] ?? null);
+
+    if (resumeToken) {
+        // open modal
+        document.getElementById('excelUploadModal')?.classList.remove('hidden');
+        document.getElementById('excelUploadModal')?.classList.add('flex');
+
+        // show filename
+        const nameEl = document.getElementById('selectedFileName');
+        if (nameEl && resumeName) nameEl.textContent = resumeName;
+
+        // ensure "required" doesn't block submits
+        const fileInput = document.getElementById('excelUploadInput');
+        fileInput?.removeAttribute('required');
+    }
+    });
+    </script>
 </x-app-layout>
