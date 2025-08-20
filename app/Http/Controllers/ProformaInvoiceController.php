@@ -18,9 +18,51 @@ use Illuminate\Support\Facades\Validator;
 use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\UploadedFile;
 
 class ProformaInvoiceController extends Controller
 {
+    /** One place to change where temp Excel files live */
+    private string $excelDisk = 'local';         // config/filesystems.php -> disks.local
+    private string $excelDir  = 'tmp_excel';     // subfolder in that disk
+
+    /** Session key for the resume stash */
+    private string $resumeKey = 'excel_resume';
+
+    /* ---------- Helpers ---------- */
+
+    private function disk()
+    {
+        return Storage::disk($this->excelDisk);
+    }
+    private function stashUploadedFile(UploadedFile $file): ?array
+    {
+        $token   = (string) Str::uuid();
+        $ext     = $file->getClientOriginalExtension() ?: 'xlsx';
+        $relPath = "{$this->excelDir}/{$token}.{$ext}"; // e.g. tmp_excel/<uuid>.xlsx
+
+        $this->disk()->makeDirectory($this->excelDir);
+
+        // write via bytes to avoid stream quirks
+        $bytes = file_get_contents($file->getRealPath());
+        $ok    = $this->disk()->put($relPath, $bytes);
+        $abs   = $this->disk()->path($relPath);
+        $exists= $this->disk()->exists($relPath);
+
+        Log::info('📦 [stash] write', compact('relPath','abs','ok','exists','token'));
+
+        if (!$ok || !$exists) {
+            return null;
+        }
+
+        return [
+            'disk'     => $this->excelDisk,                 // store the disk too
+            'path'     => $relPath,                         // relative path on disk
+            'token'    => $token,
+            'filename' => $file->getClientOriginalName(),
+        ];
+    }
+
     public function SummaryPIandProduct(Request $request)
     {
         $viewBy = $request->get('viewBy', 'pi'); // default is 'pi'
@@ -429,32 +471,21 @@ class ProformaInvoiceController extends Controller
 
     public function index(Request $request)
     {
-        Log::info('🟢 [index] hit', [
-            'has_resume' => (bool) session('excel_resume'),
-            'resume'     => session('excel_resume'),
-        ]);
-        $resume = session('excel_resume');
-
-        Log::info('🟢 [index] resume in session?', [
-            'has_resume' => (bool) $resume,
-            'resume'     => $resume,
-        ]);
+        $resume = session($this->resumeKey);
+        Log::info('🟢 [index] hit', ['resume' => $resume]);
 
         if ($resume) {
-            $rel    = $resume['path'] ?? '';
-            $abs    = Storage::disk('local')->path($rel);
-            $exists = Storage::disk('local')->exists($rel);
+            $diskName = $resume['disk'] ?? $this->excelDisk;
+            $rel      = $resume['path'] ?? '';
+            $abs      = Storage::disk($diskName)->path($rel);
+            $exists   = Storage::disk($diskName)->exists($rel);
+            $root     = config("filesystems.disks.{$diskName}.root");
 
-            Log::info('🟢 [index] checking stash on local disk', [
-                'rel'       => $rel,
-                'abs'       => $abs,
-                'exists'    => $exists,
-                'disk_root' => config('filesystems.disks.local.root'),
-            ]);
+            Log::info('🟢 [index] check stash', compact('diskName','rel','abs','exists','root'));
 
             if (!$exists) {
-                Log::info('🟢 [index] stashed file missing, clearing session', ['abs' => $abs]);
-                session()->forget('excel_resume');
+                Log::info('🟢 [index] stash missing -> clear');
+                session()->forget($this->resumeKey);
                 $resume = null;
             }
         }
@@ -608,167 +639,203 @@ class ProformaInvoiceController extends Controller
 
     public function importExcel(Request $request)
     {
+        $resumeKey = 'excel_resume';
+
         Log::info('🔴 [import] hit', [
-            'has_file'      => request()->hasFile('excel_file'),
-            'excel_token'   => request('excel_token'),
-            'session_token' => session('excel_resume.token'),
+            'has_file'      => $request->hasFile('excel_file'),
+            'excel_token'   => $request->input('excel_token'),
+            'session_token' => session("$resumeKey.token"),
         ]);
-        Log::info("📥 [importExcel] Starting import...");
+
         $request->validate([
             'excel_file'  => 'required_without:excel_token|file|mimes:xlsx,xls',
             'excel_token' => 'nullable|string',
         ]);
-        Log::info("✅ [importExcel] validation passed", [
-            'hasFile'        => $request->hasFile('excel_file'),
-            'req.excel_token'=> $request->input('excel_token'),
-            'session.token'  => session('excel_resume.token'),
-        ]);
 
         $pathToLoad = null;
+        $usedStash  = null; // keep what we used so we can clean it up on success
 
-        if ($request->hasFile('excel_file')) {
-            $file = $request->file('excel_file');
-            $pathToLoad = $file->getRealPath();
-            Log::info('📂 [importExcel] using uploaded temp', [
-                'tmp' => $pathToLoad,
-                'name'=> $file->getClientOriginalName(),
-            ]);
-        } elseif ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
-            $stash = session('excel_resume');
-            $abs   = storage_path('app/'.$stash['path']);
-            Log::info('📂 [importExcel] using stashed file', ['abs' => $abs, 'token' => $stash['token'] ?? null]);
-            if (!is_file($abs)) {
-                session()->forget('excel_resume');
-                return back()->with('excel_error', 'ไฟล์ชั่วคราวหมดอายุ กรุณาอัปโหลดใหม่');
-            }
-            $pathToLoad = $abs;
-        } else {
-            return back()->with('excel_error', 'กรุณาเลือกไฟล์ Excel');
-        }
+        try {
+            if ($request->hasFile('excel_file')) {
+                // User uploaded a file directly
 
-        $spreadsheet = IOFactory::load($pathToLoad);
+                $file       = $request->file('excel_file');
+                $pathToLoad = $file->getRealPath();
 
-        // $file = $request->file('excel_file');
-        // $pathToLoad = $file->getRealPath();
-        // $spreadsheet = IOFactory::load($pathToLoad);
-
-        Log::info("📑 [importExcel] Spreadsheet loaded");
-
-        $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, true);
-        $sheet = $spreadsheet->getActiveSheet();
-        Log::info("📊 Total rows in sheet: " . count($rows));
-
-        // Extract header
-        $header = $rows[1];
-        Log::info("🔹 Header row: ", $header);
-
-        $groupedByOrderCode = [];
-
-        // Group rows by OrderID
-        Log::info("🔄 Grouping rows by OrderID (Column B)...");
-        foreach ($rows as $rowIndex => $row) {
-            if ($rowIndex === 1) {
-                Log::info("⏭ Skipping header row");
-                continue;
-            }
-            $orderCode = $row['B'] ?? null;
-            if ($orderCode) {
-                $groupedByOrderCode[$orderCode][] = [
-                    'index' => $rowIndex,
-                    'data'  => $row,
-                ];
-            }
-        }
-        Log::info("📦 Grouped orders count: " . count($groupedByOrderCode));
-
-        // Process each order group
-        foreach ($groupedByOrderCode as $orderCode => $orderRows) {
-            Log::info("📌 Processing OrderID: {$orderCode}, rows: " . count($orderRows));
-
-            $firstRowIndex = $orderRows[0]['index'];
-            $firstRow      = $orderRows[0]['data'];
-            $piNumber = trim($firstRow['B']);
-            Log::info("📑 Extracted PI number: {$piNumber}");
-
-            // Skip if duplicate PI
-            if (ProformaInvoice::where('PInumber', $piNumber)->exists()) {
-                Log::info("⏩ Skipped duplicate PI: {$piNumber}");
-                return redirect()->back()->with('excel_error', "รหัส PI ซ้ำ: $piNumber");
-            }
-
-            // Extract IDs
-            $customerIdParts = explode('-', trim($firstRow['D']));
-            Log::info("🔍 CustomerID parts: ", $customerIdParts);
-
-            $suffix = $customerIdParts[1] ?? '';
-            [$salesID, $productionID] = explode('/', $suffix . '/');
-            Log::info("👤 SalesID: {$salesID}, ProductionID: {$productionID}");
-
-            // Find users
-            $salesUser = User::where('salesID', $salesID)->first();
-            Log::info("👤 Sales user found: " . ($salesUser?->id ?? 'none'));
-
-            $productionUser = User::where('productionID', $productionID)->first();
-            Log::info("🏭 Production user found: " . ($productionUser?->id ?? 'none'));
-
-            // Create PI
-            Log::info("🆕 Creating ProformaInvoice record...");
-            $pi = ProformaInvoice::create([
-                'PInumber'             => $piNumber,
-                'byOrder'              => trim($firstRow['C']),
-                'CustomerID'           => trim($firstRow['D']),
-                'CustomerPO'           => trim($firstRow['I']),
-                'CustomerInstruction'  => trim($firstRow['M']),
-                'FreightPrepaid'       => floatval($firstRow['N']),
-                'InsurancePrepaid'     => floatval($firstRow['O']),
-                'Deposit'              => floatval($firstRow['P']),
-                'OrderDate'      => $this->parseExcelDate($sheet->getCell("F{$firstRowIndex}"), 'DMY'),
-                'ScheduleDate'   => $this->parseExcelDate($sheet->getCell("G{$firstRowIndex}"), 'DMY'),
-                'CompletionDate' => $this->parseExcelDate($sheet->getCell("H{$firstRowIndex}"), 'DMY'),
-                'SalesPerson'          => $salesUser?->id,
-                'user_id'              => $productionUser?->id,
-            ]);
-            Log::info("✅ PI created with ID: {$pi->id}");
-
-            // Create/Update products
-            foreach ($orderRows as $orderRow) {
-                $rowData = $orderRow['data']; // the original A,B,C,... array
-                $quantity = trim($rowData['U']) . ' ' . trim($rowData['V']);
-                Log::info("📦 Processing ProductNumber: " . trim($rowData['Q']));
-
-                Product::create([
-                    'ProductNumber'          => trim($rowData['Q']),
-                    'Description'            => trim($rowData['R']),
-                    'ProductCustomerNumber'  => trim($rowData['S']),
-                    'Weight'                 => floatval($rowData['T']),
-                    'Quantity'               => $quantity,
-                    'UnitPrice'              => floatval($rowData['W']),
-                    'proforma_invoice_id'    => $pi->id,
+                Log::info('📂 [import] using uploaded temp', [
+                    'tmp'  => $pathToLoad,
+                    'name' => $file->getClientOriginalName(),
                 ]);
-                Log::info("✅ Product saved/updated: " . trim($rowData['Q']));
+
+            } elseif ($request->filled('excel_token') && session("$resumeKey.token") === $request->excel_token) {
+                // Use previously stashed file from preview
+                $stash  = session($resumeKey);
+                $disk   = $stash['disk'] ?? 'local';
+                $rel    = $stash['path'] ?? '';
+                $abs    = Storage::disk($disk)->path($rel);
+                $exists = Storage::disk($disk)->exists($rel);
+
+                Log::info('📂 [import] using stashed file', compact('disk','rel','abs','exists'));
+
+                if (!$exists) {
+                    // Stash is gone -> can’t import
+                    session()->forget($resumeKey);
+                    return back()->with('excel_error', 'ไฟล์ชั่วคราวหมดอายุ กรุณาอัปโหลดใหม่');
+                }
+
+                $pathToLoad = $abs;
+                $usedStash  = $stash; // mark for cleanup after success
+            } else {
+                return back()->with('excel_error', 'กรุณาเลือกไฟล์ Excel');
             }
 
-            // Notify production
-            if ($productionUser) {
-                Log::info("📤 Sending notification to production user ID: " . $productionUser->id);
-                $productionUser->notify(new NewPIUploaded(Auth::user(), $pi));
-            }
+            // -------- Load and import ----------
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($pathToLoad);
+            Log::info('📑 [import] spreadsheet loaded');
 
-            Log::info("✅ Imported PI: {$pi->PInumber} with " . count($orderRows) . " products.");
-            Log::info('📄 Raw Excel date cells', [
-                'OrderDate_raw'      => $firstRow['F'],
-                'ScheduleDate_raw'   => $firstRow['G'],
-                'CompletionDate_raw' => $firstRow['H'],
-                'types' => [
-                    'OrderDate'      => get_debug_type($firstRow['F']),
-                    'ScheduleDate'   => get_debug_type($firstRow['G']),
-                    'CompletionDate' => get_debug_type($firstRow['H']),
-                ]
-            ]);
+            // $file = $request->file('excel_file');
+            // $pathToLoad = $file->getRealPath();
+            // $spreadsheet = IOFactory::load($pathToLoad);
+
+            Log::info("📑 [importExcel] Spreadsheet loaded");
+
+            $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, true);
+            $sheet = $spreadsheet->getActiveSheet();
+            Log::info("📊 Total rows in sheet: " . count($rows));
+
+            // Extract header
+            $header = $rows[1];
+            Log::info("🔹 Header row: ", $header);
+
+            $groupedByOrderCode = [];
+
+            // Group rows by OrderID
+            Log::info("🔄 Grouping rows by OrderID (Column B)...");
+            foreach ($rows as $rowIndex => $row) {
+                if ($rowIndex === 1) {
+                    Log::info("⏭ Skipping header row");
+                    continue;
+                }
+                $orderCode = $row['B'] ?? null;
+                if ($orderCode) {
+                    $groupedByOrderCode[$orderCode][] = [
+                        'index' => $rowIndex,
+                        'data'  => $row,
+                    ];
+                }
+            }
+            Log::info("📦 Grouped orders count: " . count($groupedByOrderCode));
+
+            // Process each order group
+            foreach ($groupedByOrderCode as $orderCode => $orderRows) {
+                Log::info("📌 Processing OrderID: {$orderCode}, rows: " . count($orderRows));
+
+                $firstRowIndex = $orderRows[0]['index'];
+                $firstRow      = $orderRows[0]['data'];
+                $piNumber = trim($firstRow['B']);
+                Log::info("📑 Extracted PI number: {$piNumber}");
+
+                // Skip if duplicate PI
+                if (ProformaInvoice::where('PInumber', $piNumber)->exists()) {
+                    Log::info("⏩ Skipped duplicate PI: {$piNumber}");
+                    return redirect()->back()->with('excel_error', "รหัส PI ซ้ำ: $piNumber");
+                }
+
+                // Extract IDs
+                $customerIdParts = explode('-', trim($firstRow['D']));
+                Log::info("🔍 CustomerID parts: ", $customerIdParts);
+
+                $suffix = $customerIdParts[1] ?? '';
+                [$salesID, $productionID] = explode('/', $suffix . '/');
+                Log::info("👤 SalesID: {$salesID}, ProductionID: {$productionID}");
+
+                // Find users
+                $salesUser = User::where('salesID', $salesID)->first();
+                Log::info("👤 Sales user found: " . ($salesUser?->id ?? 'none'));
+
+                $productionUser = User::where('productionID', $productionID)->first();
+                Log::info("🏭 Production user found: " . ($productionUser?->id ?? 'none'));
+
+                // Create PI
+                Log::info("🆕 Creating ProformaInvoice record...");
+                $pi = ProformaInvoice::create([
+                    'PInumber'             => $piNumber,
+                    'byOrder'              => trim($firstRow['C']),
+                    'CustomerID'           => trim($firstRow['D']),
+                    'CustomerPO'           => trim($firstRow['I']),
+                    'CustomerInstruction'  => trim($firstRow['M']),
+                    'FreightPrepaid'       => floatval($firstRow['N']),
+                    'InsurancePrepaid'     => floatval($firstRow['O']),
+                    'Deposit'              => floatval($firstRow['P']),
+                    'OrderDate'      => $this->parseExcelDate($sheet->getCell("F{$firstRowIndex}"), 'DMY'),
+                    'ScheduleDate'   => $this->parseExcelDate($sheet->getCell("G{$firstRowIndex}"), 'DMY'),
+                    'CompletionDate' => $this->parseExcelDate($sheet->getCell("H{$firstRowIndex}"), 'DMY'),
+                    'SalesPerson'          => $salesUser?->id,
+                    'user_id'              => $productionUser?->id,
+                ]);
+                Log::info("✅ PI created with ID: {$pi->id}");
+
+                // Create/Update products
+                foreach ($orderRows as $orderRow) {
+                    $rowData = $orderRow['data']; // the original A,B,C,... array
+                    $quantity = trim($rowData['U']) . ' ' . trim($rowData['V']);
+                    Log::info("📦 Processing ProductNumber: " . trim($rowData['Q']));
+
+                    Product::create([
+                        'ProductNumber'          => trim($rowData['Q']),
+                        'Description'            => trim($rowData['R']),
+                        'ProductCustomerNumber'  => trim($rowData['S']),
+                        'Weight'                 => floatval($rowData['T']),
+                        'Quantity'               => $quantity,
+                        'UnitPrice'              => floatval($rowData['W']),
+                        'proforma_invoice_id'    => $pi->id,
+                    ]);
+                    Log::info("✅ Product saved/updated: " . trim($rowData['Q']));
+                }
+
+                // Notify production
+                if ($productionUser) {
+                    Log::info("📤 Sending notification to production user ID: " . $productionUser->id);
+                    $productionUser->notify(new NewPIUploaded(Auth::user(), $pi));
+                }
+
+                Log::info("✅ Imported PI: {$pi->PInumber} with " . count($orderRows) . " products.");
+                Log::info('📄 Raw Excel date cells', [
+                    'OrderDate_raw'      => $firstRow['F'],
+                    'ScheduleDate_raw'   => $firstRow['G'],
+                    'CompletionDate_raw' => $firstRow['H'],
+                    'types' => [
+                        'OrderDate'      => get_debug_type($firstRow['F']),
+                        'ScheduleDate'   => get_debug_type($firstRow['G']),
+                        'CompletionDate' => get_debug_type($firstRow['H']),
+                    ]
+                ]);
+            }
+            $stashToClear = $usedStash ?: session($resumeKey);
+            if ($stashToClear) {
+                $disk = $stashToClear['disk'] ?? 'local';
+                $rel  = $stashToClear['path'] ?? null;
+
+                if ($rel && Storage::disk($disk)->exists($rel)) {
+                    $ok = Storage::disk($disk)->delete($rel);
+                    Log::info('🧹 [import] deleted stashed file', [
+                        'disk' => $disk, 'rel' => $rel, 'ok' => $ok
+                    ]);
+                } else {
+                    Log::info('🧹 [import] no stashed file to delete', [
+                        'disk' => $disk ?? null, 'rel' => $rel, 'exists' => $rel ? Storage::disk($disk)->exists($rel) : null
+                    ]);
+                }
+
+                session()->forget($resumeKey);
+                Log::info('🧹 [import] cleared session resume token');
+            }
+            Log::info("🎯 [importExcel] Import completed successfully");
+            return redirect()->back()->with('excel_success', '📥 นำเข้าข้อมูล Excel สำเร็จแล้ว');
+        } catch (\Throwable $e) {
+            Log::error('🔴 [import] error: '.$e->getMessage());
+            return back()->with('excel_error', 'นำเข้าไม่สำเร็จ');
         }
-        session()->forget('excel_resume');
-        Log::info("🎯 [importExcel] Import completed successfully");
-        return redirect()->back()->with('excel_success', '📥 นำเข้าข้อมูล Excel สำเร็จแล้ว');
     }
 
 
@@ -855,113 +922,81 @@ class ProformaInvoiceController extends Controller
     public function preview(Request $request)
     {
         Log::info('🟡 [preview] hit', [
-            'has_file'      => request()->hasFile('excel_file'),
-            'excel_token'   => request('excel_token'),
-            'session_token' => session('excel_resume.token'),
+            'has_file'      => $request->hasFile('excel_file'),
+            'excel_token'   => $request->input('excel_token'),
+            'session_token' => session($this->resumeKey . '.token'),
         ]);
+
         $request->validate([
             'excel_file'  => 'required_without:excel_token|file|mimes:xlsx,xls',
             'excel_token' => 'nullable|string',
         ]);
 
         try {
-            Log::info('🟡 [preview] request', [
-                'has_file'     => $request->hasFile('excel_file'),
-                'excel_token'  => $request->input('excel_token'),
-                'session_token'=> session('excel_resume.token'),
-            ]);
-
-            $token = null;
-            $filename = null;
             $loadPath = null;
+            $filename = null;
+            $token    = null;
 
             if ($request->hasFile('excel_file')) {
+
+                $this->clearCurrentStash();
+
                 $file     = $request->file('excel_file');
                 $loadPath = $file->getRealPath();
                 $filename = $file->getClientOriginalName();
 
-                Log::info('🟡 [preview] using uploaded file', [
+                Log::info('🟡 [preview] using uploaded temp', [
                     'realpath' => $loadPath,
                     'name'     => $filename,
                 ]);
 
-                // STASH (robust): write bytes via Storage::put and verify with Storage::exists
-                try {
-                    $token = (string) Str::uuid();
-                    $ext   = $file->getClientOriginalExtension() ?: 'xlsx';
-
-                    Storage::disk('local')->makeDirectory('tmp_excel');
-
-                    $storedRel = "tmp_excel/{$token}.{$ext}";
-                    $bytesOk   = Storage::disk('local')->put($storedRel, file_get_contents($file->getRealPath()));
-                    $abs       = Storage::disk('local')->path($storedRel);
-                    $exists    = Storage::disk('local')->exists($storedRel);
-
-                    Log::info('🟡 [preview] stashed copy', [
-                        'stored' => $storedRel,
-                        'abs'    => $abs,
-                        'bytesOk'=> $bytesOk,
-                        'exists' => $exists,
-                        'token'  => $token,
-                    ]);
-
-                    if ($bytesOk && $exists) {
-                        session([
-                            'excel_resume' => [
-                                'token'    => $token,
-                                'path'     => $storedRel, // relative to storage/app
-                                'filename' => $filename,
-                            ],
-                        ]);
-                    } else {
-                        Log::error('🔴 [preview] failed to stash uploaded file', [
-                            'stored' => $storedRel,
-                            'abs'    => $abs,
-                            'exists' => $exists,
-                            'bytesOk'=> $bytesOk,
-                        ]);
-                        $token = null; // don’t pass a broken token forward
-                    }
-                } catch (\Throwable $e) {
-                    Log::error('🔴 [preview] exception while stashing', ['msg' => $e->getMessage()]);
-                    $token = null;
+                // Stash for later "Upload" without reselecting
+                $stash = $this->stashUploadedFile($file);
+                if ($stash) {
+                    session([$this->resumeKey => $stash]);
+                    $token = $stash['token'];
+                } else {
+                    Log::warning('🟡 [preview] stash failed; proceeding without token');
                 }
-            } elseif ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
-                $stash = session('excel_resume');
-                $abs   = storage_path('app/'.$stash['path']);
 
-                Log::info('🟡 [preview] resume via token', ['abs' => $abs, 'token' => $stash['token'] ?? null]);
+            } elseif ($request->filled('excel_token') && session($this->resumeKey . '.token') === $request->excel_token) {
+                $stash   = session($this->resumeKey);
+                $disk    = $stash['disk'] ?? $this->excelDisk;
+                $rel     = $stash['path'] ?? '';
+                $exists  = Storage::disk($disk)->exists($rel);
 
-                if (!is_file($abs)) {
-                    Log::info('[preview] resume token provided but file missing, clearing session', ['abs' => $abs]);
-                    session()->forget('excel_resume');
+                Log::info('🟡 [preview] resume via token', [
+                    'disk' => $disk,
+                    'rel'  => $rel,
+                    'abs'  => Storage::disk($disk)->path($rel),
+                    'exists' => $exists,
+                ]);
+
+                if (!$exists) {
+                    $this->clearCurrentStash();
+                    // session()->forget($this->resumeKey);
                     return back()->with('excel_error', 'ไฟล์ชั่วคราวหมดอายุ กรุณาเลือกไฟล์อีกครั้ง');
                 }
-                $loadPath = $abs;
-                $token    = $stash['token'] ?? null;
-                $filename = $stash['filename'] ?? null;
+
+                $loadPath = Storage::disk($disk)->path($rel);
+                $token    = $stash['token'];
+                $filename = $stash['filename'] ?? basename($rel);
             } else {
                 return back()->with('excel_error', 'กรุณาเลือกไฟล์ Excel');
             }
 
-            Log::info('🟡 [preview] will load spreadsheet', [
-                'path'     => $loadPath,
-                'filename' => $filename,
-                'token'    => $token,
-            ]);
-
+            Log::info('🟡 [preview] loading spreadsheet', compact('loadPath','filename','token'));
             $spreadsheet = IOFactory::load($loadPath);
             $rows = $spreadsheet->getActiveSheet()->toArray(null, false, false, false);
-
-            Log::info('🟡 [preview] rows loaded', ['rows' => is_array($rows) ? count($rows) : 0]);
+            Log::info('🟡 [preview] rows', ['count' => is_array($rows) ? count($rows) : 0]);
 
             return view('proformaInvoice.preview', [
                 'rows'          => $rows,
-                'excelToken'    => $token,
+                'excelToken'    => $token,     // pass back so index can reuse
                 'excelFilename' => $filename,
             ]);
         } catch (\Throwable $e) {
-            Log::error("📛 Excel Preview Error: " . $e->getMessage());
+            Log::error('🔴 [preview] error: '.$e->getMessage());
             return back()->with('excel_error', 'ไม่สามารถอ่านไฟล์ Excel ได้');
         }
     }
@@ -1114,25 +1149,31 @@ class ProformaInvoiceController extends Controller
             return null;
         }
     }
-    public function clearUploadStash(Request $request)
+
+    private function clearCurrentStash(): void
     {
-        $resume = session('excel_resume');
-        $had = (bool) $resume;
+        $resume = session($this->resumeKey);
+        $had    = (bool) $resume;
 
         if ($resume && !empty($resume['path'])) {
+            $disk = $resume['disk'] ?? $this->excelDisk;
+            $rel  = $resume['path'];
+            $abs  = Storage::disk($disk)->path($rel);
             try {
-                // use the same disk you used to store the file
-                Storage::disk('local')->delete($resume['path']);
+                if (Storage::disk($disk)->exists($rel)) {
+                    $ok = Storage::disk($disk)->delete($rel);
+                    Log::info('🧹 [stash] deleted file', compact('disk','rel','abs','ok'));
+                } else {
+                    Log::info('🧹 [stash] nothing to delete', compact('disk','rel','abs'));
+                }
             } catch (\Throwable $e) {
-                Log::warning('🧹 [clearUploadStash] failed to delete temp file', [
-                    'path' => $resume['path'], 'err' => $e->getMessage()
+                Log::warning('🧹 [stash] delete failed', [
+                    'path' => $rel, 'err' => $e->getMessage()
                 ]);
             }
         }
 
-        session()->forget('excel_resume');
-        Log::info('🧹 [clearUploadStash] cleared resume', ['had_resume' => $had]);
-
-        return response()->json(['ok' => true]);
+        session()->forget($this->resumeKey);
+        Log::info('🧹 [stash] session cleared', ['had_resume' => $had]);
     }
 }
