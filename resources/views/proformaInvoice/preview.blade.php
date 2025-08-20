@@ -130,5 +130,10 @@
     input?.addEventListener('input', applyFilter);
     });
     </script>
+<script>
+console.log('[preview] token:', @json($excelToken));
+console.log('[preview] filename:', @json($excelFilename));
+console.log('[preview] rows.length:', {{ is_array($rows ?? null) ? count($rows) : 0 }});
+</script>
 
 </x-app-layout>

@@ -51,5 +51,8 @@ Route::post('/notifications/{id}/read', function ($id) {
     return response()->json(['status' => 'read']);
 })->middleware('auth');
 
-
+Route::post(
+    '/proforma-invoices/clear-upload-stash',
+    [ProformaInvoiceController::class, 'clearUploadStash']
+)->name('proformaInvoice.clearUploadStash');
 require __DIR__.'/auth.php';

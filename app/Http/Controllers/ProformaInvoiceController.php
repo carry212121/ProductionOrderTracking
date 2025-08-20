@@ -429,16 +429,36 @@ class ProformaInvoiceController extends Controller
 
     public function index(Request $request)
     {
-        $resume = null;
-        if ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
-            $stash = session('excel_resume');
-            $abs   = storage_path('app/'.($stash['path'] ?? ''));
-            if ($stash && is_file($abs)) {
-                $resume = $stash;
-            } else {
-                session()->forget('excel_resume'); // avoid broken token
+        Log::info('🟢 [index] hit', [
+            'has_resume' => (bool) session('excel_resume'),
+            'resume'     => session('excel_resume'),
+        ]);
+        $resume = session('excel_resume');
+
+        Log::info('🟢 [index] resume in session?', [
+            'has_resume' => (bool) $resume,
+            'resume'     => $resume,
+        ]);
+
+        if ($resume) {
+            $rel    = $resume['path'] ?? '';
+            $abs    = Storage::disk('local')->path($rel);
+            $exists = Storage::disk('local')->exists($rel);
+
+            Log::info('🟢 [index] checking stash on local disk', [
+                'rel'       => $rel,
+                'abs'       => $abs,
+                'exists'    => $exists,
+                'disk_root' => config('filesystems.disks.local.root'),
+            ]);
+
+            if (!$exists) {
+                Log::info('🟢 [index] stashed file missing, clearing session', ['abs' => $abs]);
+                session()->forget('excel_resume');
+                $resume = null;
             }
         }
+
         $user = Auth::user();
 
         $query = ProformaInvoice::with(['user', 'products.jobControls', 'salesPerson']);
@@ -588,48 +608,51 @@ class ProformaInvoiceController extends Controller
 
     public function importExcel(Request $request)
     {
+        Log::info('🔴 [import] hit', [
+            'has_file'      => request()->hasFile('excel_file'),
+            'excel_token'   => request('excel_token'),
+            'session_token' => session('excel_resume.token'),
+        ]);
         Log::info("📥 [importExcel] Starting import...");
-
-        // Validate file
-        Log::info("📄 Validating request file...");
         $request->validate([
-            'excel_file' => 'required|file|mimes:xlsx,xls',
+            'excel_file'  => 'required_without:excel_token|file|mimes:xlsx,xls',
             'excel_token' => 'nullable|string',
         ]);
-        Log::info("✅ File validation passed");
+        Log::info("✅ [importExcel] validation passed", [
+            'hasFile'        => $request->hasFile('excel_file'),
+            'req.excel_token'=> $request->input('excel_token'),
+            'session.token'  => session('excel_resume.token'),
+        ]);
 
-        \PhpOffice\PhpSpreadsheet\Spreadsheet::class;
-        
+        $pathToLoad = null;
+
         if ($request->hasFile('excel_file')) {
-            // NEW FILE TAKES PRIORITY
             $file = $request->file('excel_file');
-            Log::info("📂 Uploaded file path: " . $file->getRealPath());
-            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
-
-            // refresh resume stash so index/back can reopen modal for this file
-            $token = (string) \Illuminate\Support\Str::uuid();
-            $ext   = $file->getClientOriginalExtension() ?: 'xlsx';
-            Storage::makeDirectory('tmp_excel');
-            $stored = $file->storeAs('tmp_excel', "{$token}.{$ext}");
-            session(['excel_resume' => [
-                'token'    => $token,
-                'path'     => $stored,
-                'filename' => $file->getClientOriginalName(),
-            ]]);
+            $pathToLoad = $file->getRealPath();
+            Log::info('📂 [importExcel] using uploaded temp', [
+                'tmp' => $pathToLoad,
+                'name'=> $file->getClientOriginalName(),
+            ]);
         } elseif ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
             $stash = session('excel_resume');
-            $path  = storage_path('app/'.$stash['path']);
-            Log::info("📂 Using stashed file: ".$path);
-
-            if (!is_file($path)) {
+            $abs   = storage_path('app/'.$stash['path']);
+            Log::info('📂 [importExcel] using stashed file', ['abs' => $abs, 'token' => $stash['token'] ?? null]);
+            if (!is_file($abs)) {
                 session()->forget('excel_resume');
                 return back()->with('excel_error', 'ไฟล์ชั่วคราวหมดอายุ กรุณาอัปโหลดใหม่');
             }
-            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
+            $pathToLoad = $abs;
         } else {
             return back()->with('excel_error', 'กรุณาเลือกไฟล์ Excel');
         }
-        Log::info("📑 Spreadsheet loaded successfully");
+
+        $spreadsheet = IOFactory::load($pathToLoad);
+
+        // $file = $request->file('excel_file');
+        // $pathToLoad = $file->getRealPath();
+        // $spreadsheet = IOFactory::load($pathToLoad);
+
+        Log::info("📑 [importExcel] Spreadsheet loaded");
 
         $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, true);
         $sheet = $spreadsheet->getActiveSheet();
@@ -743,7 +766,7 @@ class ProformaInvoiceController extends Controller
                 ]
             ]);
         }
-
+        session()->forget('excel_resume');
         Log::info("🎯 [importExcel] Import completed successfully");
         return redirect()->back()->with('excel_success', '📥 นำเข้าข้อมูล Excel สำเร็จแล้ว');
     }
@@ -831,53 +854,86 @@ class ProformaInvoiceController extends Controller
     }
     public function preview(Request $request)
     {
+        Log::info('🟡 [preview] hit', [
+            'has_file'      => request()->hasFile('excel_file'),
+            'excel_token'   => request('excel_token'),
+            'session_token' => session('excel_resume.token'),
+        ]);
         $request->validate([
             'excel_file'  => 'required_without:excel_token|file|mimes:xlsx,xls',
             'excel_token' => 'nullable|string',
         ]);
 
         try {
+            Log::info('🟡 [preview] request', [
+                'has_file'     => $request->hasFile('excel_file'),
+                'excel_token'  => $request->input('excel_token'),
+                'session_token'=> session('excel_resume.token'),
+            ]);
+
             $token = null;
             $filename = null;
-            $loadPath = null; // the path we will actually read for preview
+            $loadPath = null;
 
             if ($request->hasFile('excel_file')) {
-                // 1) Preview from the request's temp file (always present now)
                 $file     = $request->file('excel_file');
                 $loadPath = $file->getRealPath();
                 $filename = $file->getClientOriginalName();
 
-                // 2) Stash a copy for "resume" (optional; won't break preview if it fails)
+                Log::info('🟡 [preview] using uploaded file', [
+                    'realpath' => $loadPath,
+                    'name'     => $filename,
+                ]);
+
+                // STASH (robust): write bytes via Storage::put and verify with Storage::exists
                 try {
-                    $token = (string) \Illuminate\Support\Str::uuid();
+                    $token = (string) Str::uuid();
                     $ext   = $file->getClientOriginalExtension() ?: 'xlsx';
 
                     Storage::disk('local')->makeDirectory('tmp_excel');
-                    $stored = $file->storeAs('tmp_excel', "{$token}.{$ext}", 'local'); // relative path
 
-                    // keep resume only if the stored file actually exists
-                    $abs = storage_path('app/'.$stored);
-                    if (is_file($abs)) {
+                    $storedRel = "tmp_excel/{$token}.{$ext}";
+                    $bytesOk   = Storage::disk('local')->put($storedRel, file_get_contents($file->getRealPath()));
+                    $abs       = Storage::disk('local')->path($storedRel);
+                    $exists    = Storage::disk('local')->exists($storedRel);
+
+                    Log::info('🟡 [preview] stashed copy', [
+                        'stored' => $storedRel,
+                        'abs'    => $abs,
+                        'bytesOk'=> $bytesOk,
+                        'exists' => $exists,
+                        'token'  => $token,
+                    ]);
+
+                    if ($bytesOk && $exists) {
                         session([
                             'excel_resume' => [
                                 'token'    => $token,
-                                'path'     => $stored,
+                                'path'     => $storedRel, // relative to storage/app
                                 'filename' => $filename,
                             ],
                         ]);
                     } else {
-                        // don't set a broken token
-                        $token = null;
+                        Log::error('🔴 [preview] failed to stash uploaded file', [
+                            'stored' => $storedRel,
+                            'abs'    => $abs,
+                            'exists' => $exists,
+                            'bytesOk'=> $bytesOk,
+                        ]);
+                        $token = null; // don’t pass a broken token forward
                     }
                 } catch (\Throwable $e) {
-                    Log::warning('⚠️ Failed to stash preview file', ['msg' => $e->getMessage()]);
+                    Log::error('🔴 [preview] exception while stashing', ['msg' => $e->getMessage()]);
                     $token = null;
                 }
             } elseif ($request->filled('excel_token') && session('excel_resume.token') === $request->excel_token) {
-                // Fallback to the stashed file
                 $stash = session('excel_resume');
                 $abs   = storage_path('app/'.$stash['path']);
+
+                Log::info('🟡 [preview] resume via token', ['abs' => $abs, 'token' => $stash['token'] ?? null]);
+
                 if (!is_file($abs)) {
+                    Log::info('[preview] resume token provided but file missing, clearing session', ['abs' => $abs]);
                     session()->forget('excel_resume');
                     return back()->with('excel_error', 'ไฟล์ชั่วคราวหมดอายุ กรุณาเลือกไฟล์อีกครั้ง');
                 }
@@ -888,10 +944,16 @@ class ProformaInvoiceController extends Controller
                 return back()->with('excel_error', 'กรุณาเลือกไฟล์ Excel');
             }
 
-            // Read for preview
-            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($loadPath);
-            // use numeric keys (0..N) for rows and columns
+            Log::info('🟡 [preview] will load spreadsheet', [
+                'path'     => $loadPath,
+                'filename' => $filename,
+                'token'    => $token,
+            ]);
+
+            $spreadsheet = IOFactory::load($loadPath);
             $rows = $spreadsheet->getActiveSheet()->toArray(null, false, false, false);
+
+            Log::info('🟡 [preview] rows loaded', ['rows' => is_array($rows) ? count($rows) : 0]);
 
             return view('proformaInvoice.preview', [
                 'rows'          => $rows,
@@ -903,6 +965,7 @@ class ProformaInvoiceController extends Controller
             return back()->with('excel_error', 'ไม่สามารถอ่านไฟล์ Excel ได้');
         }
     }
+
 
 
 
@@ -1051,5 +1114,25 @@ class ProformaInvoiceController extends Controller
             return null;
         }
     }
+    public function clearUploadStash(Request $request)
+    {
+        $resume = session('excel_resume');
+        $had = (bool) $resume;
 
+        if ($resume && !empty($resume['path'])) {
+            try {
+                // use the same disk you used to store the file
+                Storage::disk('local')->delete($resume['path']);
+            } catch (\Throwable $e) {
+                Log::warning('🧹 [clearUploadStash] failed to delete temp file', [
+                    'path' => $resume['path'], 'err' => $e->getMessage()
+                ]);
+            }
+        }
+
+        session()->forget('excel_resume');
+        Log::info('🧹 [clearUploadStash] cleared resume', ['had_resume' => $had]);
+
+        return response()->json(['ok' => true]);
+    }
 }

@@ -380,20 +380,37 @@
             const file = event.target.files[0];
             fileNameDisplay.textContent = file ? file.name : '';
         });
-        function closeUploadModal() {
-            // Hide modal
-            document.getElementById('excelUploadModal').classList.add('hidden');
-
-            // Reset file input
-            const fileInput = document.getElementById('excelUploadInput');
-            fileInput.value = '';
-
-            // Clear displayed filename
-            document.getElementById('selectedFileName').textContent = 'ยังไม่ได้เลือกไฟล์';
-
-            // Optional: Reset preview input too
+        async function closeUploadModal() {
+            const modal        = document.getElementById('excelUploadModal');
+            const fileInput    = document.getElementById('excelUploadInput');
+            const nameEl       = document.getElementById('selectedFileName');
             const previewInput = document.getElementById('previewExcelFileInput');
-            if (previewInput) previewInput.value = '';
+            const tokenUpload  = document.getElementById('excelTokenUpload');
+            const tokenPreview = document.getElementById('excelTokenPreview');
+
+            // 1) Clear inputs on the client
+            fileInput && (fileInput.value = '');
+            previewInput && (previewInput.value = '');
+            if (nameEl) nameEl.textContent = 'ยังไม่ได้เลือกไฟล์';
+            tokenUpload && tokenUpload.setAttribute('value', '');
+            tokenPreview && tokenPreview.setAttribute('value', '');
+
+            // 2) Tell server to forget the resume token (and delete temp file)
+            try {
+                await fetch("{{ route('proformaInvoice.clearUploadStash') }}", {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Accept': 'application/json'
+                }
+                });
+                console.log('[modal] cleared server resume token');
+            } catch (e) {
+                console.warn('[modal] failed to clear server token', e);
+            }
+
+            // 3) Hide modal
+            modal.classList.add('hidden');
         }
         function submitPreviewForm() {
             const fileInput    = document.getElementById('excelUploadInput');
@@ -606,4 +623,53 @@
     }
     });
     </script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('[index] resume from server:', @json($resume));
+  const uploadInput   = document.getElementById('excelUploadInput');
+  const tokenUpload   = document.getElementById('excelTokenUpload');
+  const tokenPreview  = document.getElementById('excelTokenPreview');
+  const nameEl        = document.getElementById('selectedFileName');
+
+  if (@json(!empty($resume))) {
+    console.log('[index] opening modal with resume token:', @json($resume['token'] ?? null));
+    document.getElementById('excelUploadModal')?.classList.remove('hidden');
+    document.getElementById('excelUploadModal')?.classList.add('flex');
+    if (nameEl) nameEl.textContent = @json($resume['filename'] ?? 'ยังไม่ได้เลือกไฟล์');
+    uploadInput?.removeAttribute('required');
+  }
+
+  uploadInput?.addEventListener('change', (e) => {
+    const f = e.target.files?.[0];
+    console.log('[index] file changed:', f?.name);
+    tokenUpload?.setAttribute('value','');
+    tokenPreview?.setAttribute('value','');
+    if (nameEl) nameEl.textContent = f ? f.name : 'ยังไม่ได้เลือกไฟล์';
+  });
+
+  // When clicking “ดูตัวอย่าง”
+  window.submitPreviewForm = function () {
+    const previewInput = document.getElementById('previewExcelFileInput');
+    const tokenInput   = document.getElementById('excelTokenPreview');
+    const file = uploadInput?.files?.[0] || null;
+
+    console.log('[index] submitPreviewForm()', {
+      hasNewFile: !!file,
+      tokenValue: tokenInput?.value
+    });
+
+    if (file) {
+      const dt = new DataTransfer(); dt.items.add(file);
+      previewInput.files = dt.files;
+      tokenInput.value = ''; // force preview to use new file
+    } else if (!tokenInput.value) {
+      Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ก่อนดูตัวอย่าง', confirmButtonText: 'ตกลง' });
+      return;
+    }
+
+    document.getElementById('previewForm').submit();
+  };
+});
+</script>
+
 </x-app-layout>
